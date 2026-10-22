@@ -27,6 +27,9 @@ pnpm-debug.log*
 .env.local
 .env.*.local
 
+# Tesseract models
+*.traineddata
+
 # Editor & OS artifacts
 .vscode/
 .idea/

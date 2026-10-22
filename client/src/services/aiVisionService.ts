@@ -14,6 +14,7 @@ export interface VehicleDetectionResult {
   bbox: [number, number, number, number]; // [x, y, width, height]
   snapshotDataUrl?: string;
   plateNumberSuggestion?: string;
+  fallbackPlate?: string;
   isOcrLiveRead?: boolean;
   plateCropUrl?: string;
   ocrCountryLabel?: string;
@@ -251,7 +252,6 @@ class AIVisionService {
     const confidencePct = Math.round(score * 100);
     const aspectRatio = w / Math.max(h, 1);
     const isOcrLive = !!this.lastOcrPlate;
-    const resolvePlate = (fallback: string) => this.lastOcrPlate || fallback;
 
     // Capture snapshot frame
     const canvas = document.createElement('canvas');
@@ -273,7 +273,8 @@ class AIVisionService {
         detectedObject: objectClass,
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: resolvePlate('GB-1020-MC'),
+        plateNumberSuggestion: this.lastOcrPlate || '',
+        fallbackPlate: 'GB-1020-MC',
         isOcrLiveRead: isOcrLive,
         plateCropUrl: this.lastOcrCrop || undefined,
         ocrCountryLabel: this.lastOcrCountryLabel || undefined
@@ -290,7 +291,8 @@ class AIVisionService {
         detectedObject: 'bus',
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: resolvePlate('GB-6789-DX'),
+        plateNumberSuggestion: this.lastOcrPlate || '',
+        fallbackPlate: 'GB-6789-DX',
         isOcrLiveRead: isOcrLive,
         plateCropUrl: this.lastOcrCrop || undefined,
         ocrCountryLabel: this.lastOcrCountryLabel || undefined
@@ -310,7 +312,8 @@ class AIVisionService {
           detectedObject: 'semi-trailer',
           bbox,
           snapshotDataUrl,
-          plateNumberSuggestion: resolvePlate('GB-9900-HB'),
+          plateNumberSuggestion: this.lastOcrPlate || '',
+          fallbackPlate: 'GB-9900-HB',
           isOcrLiveRead: isOcrLive,
           plateCropUrl: this.lastOcrCrop || undefined,
           ocrCountryLabel: this.lastOcrCountryLabel || undefined
@@ -324,7 +327,8 @@ class AIVisionService {
         detectedObject: 'truck',
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: resolvePlate('GB-8765-BZ'),
+        plateNumberSuggestion: this.lastOcrPlate || '',
+        fallbackPlate: 'GB-8765-BZ',
         isOcrLiveRead: isOcrLive,
         plateCropUrl: this.lastOcrCrop || undefined,
         ocrCountryLabel: this.lastOcrCountryLabel || undefined
@@ -343,7 +347,8 @@ class AIVisionService {
         detectedObject: 'taxi',
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: resolvePlate('GB-2345-AF'),
+        plateNumberSuggestion: this.lastOcrPlate || '',
+        fallbackPlate: 'GB-2345-AF',
         isOcrLiveRead: isOcrLive,
         plateCropUrl: this.lastOcrCrop || undefined,
         ocrCountryLabel: this.lastOcrCountryLabel || undefined
@@ -358,7 +363,8 @@ class AIVisionService {
       detectedObject: 'car',
       bbox,
       snapshotDataUrl,
-      plateNumberSuggestion: resolvePlate('GB-4512-AZ'),
+      plateNumberSuggestion: this.lastOcrPlate || '',
+      fallbackPlate: 'GB-4512-AZ',
       isOcrLiveRead: isOcrLive,
       plateCropUrl: this.lastOcrCrop || undefined,
       ocrCountryLabel: this.lastOcrCountryLabel || undefined
@@ -421,7 +427,9 @@ class AIVisionService {
       detectedObject: 'car',
       bbox,
       snapshotDataUrl: canvas.toDataURL('image/jpeg', 0.8),
-      plateNumberSuggestion: 'GB-4512-AZ'
+      plateNumberSuggestion: this.lastOcrPlate || '',
+      fallbackPlate: 'GB-4512-AZ',
+      isOcrLiveRead: !!this.lastOcrPlate
     };
   }
 }

@@ -60,8 +60,9 @@ class AnprOcrService {
     cropH: number
   ): HTMLCanvasElement {
     const targetCanvas = document.createElement('canvas');
-    targetCanvas.width = Math.max(120, cropW * 2); // Upscale for better OCR accuracy
-    targetCanvas.height = Math.max(40, cropH * 2);
+    // Upscale for optimal Tesseract LSTM character height (30-45px per character)
+    targetCanvas.width = Math.max(300, cropW * 2);
+    targetCanvas.height = Math.max(80, cropH * 2);
     const ctx = targetCanvas.getContext('2d');
     if (!ctx) return targetCanvas;
 
@@ -79,22 +80,66 @@ class AnprOcrService {
     const imgData = ctx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
     const data = imgData.data;
 
-    // High-contrast Grayscale with Dynamic Range Stretching (optimal for Tesseract LSTM)
+    // 1. Grayscale & Dynamic Range Stretching (optimal for Tesseract LSTM)
     let minLum = 255;
     let maxLum = 0;
+    const gray = new Uint8ClampedArray(targetCanvas.width * targetCanvas.height);
     for (let i = 0; i < data.length; i += 4) {
       const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
       if (lum < minLum) minLum = lum;
       if (lum > maxLum) maxLum = lum;
+      gray[i / 4] = Math.round(lum);
     }
     const range = Math.max(1, maxLum - minLum);
 
+    // 2. Otsu's adaptive threshold calculation on stretched luminance
+    const hist = new Uint32Array(256);
+    let sum = 0;
+    for (let i = 0; i < gray.length; i++) {
+      const val = Math.round(((gray[i] - minLum) / range) * 255);
+      gray[i] = val;
+      hist[val]++;
+      sum += val;
+    }
+
+    const total = gray.length;
+    let sumB = 0;
+    let wB = 0;
+    let maxVariance = 0;
+    let threshold = 128;
+
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t];
+      if (wB === 0) continue;
+      const wF = total - wB;
+      if (wF === 0) break;
+
+      sumB += t * hist[t];
+      const mB = sumB / wB;
+      const mF = (sum - sumB) / wF;
+      const between = wB * wF * (mB - mF) * (mB - mF);
+      if (between > maxVariance) {
+        maxVariance = between;
+        threshold = t;
+      }
+    }
+
+    // Polarity check: count pixels below threshold
+    let darkCount = 0;
+    for (let i = 0; i < gray.length; i++) {
+      if (gray[i] < threshold) darkCount++;
+    }
+
+    // Standard plate: dark text on light background (< 55% dark pixels)
+    // If background is dark (e.g. black car grille / dark bumper), invert so text is crisp black on white
+    const invert = darkCount > (total * 0.55);
+
     for (let i = 0; i < data.length; i += 4) {
-      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      const stretched = Math.round(((lum - minLum) / range) * 255);
-      data[i] = stretched;
-      data[i + 1] = stretched;
-      data[i + 2] = stretched;
+      const isChar = gray[i / 4] < threshold;
+      const finalVal = invert ? (isChar ? 255 : 0) : (isChar ? 0 : 255);
+      data[i] = finalVal;
+      data[i + 1] = finalVal;
+      data[i + 2] = finalVal;
     }
 
     ctx.putImageData(imgData, 0, 0);
@@ -152,33 +197,58 @@ class AnprOcrService {
       if (cropW < 20 || cropH < 10) return null;
 
       // Preprocess crop
-      const processedCanvas = this.preprocessPlateImage(srcCanvas, cropX, cropY, cropW, cropH);
-      const cropDataUrl = processedCanvas.toDataURL('image/jpeg', 0.85);
+      let activeCanvas = this.preprocessPlateImage(srcCanvas, cropX, cropY, cropW, cropH);
 
       // Perform OCR
-      let result = await this.worker.recognize(processedCanvas);
+      let result = await this.worker.recognize(activeCanvas);
       let rawText = result.data.text ? result.data.text.trim() : '';
+      let normalized = rawText ? normalizePlateText(rawText) : null;
 
-      // Fallback: If vehicle bbox was passed but OCR found nothing, try center reticle
-      if (!rawText && bbox && source instanceof HTMLVideoElement) {
+      // Fallback 1: If vehicle bbox did not yield a valid plate, try the central optical reticle (Viseur LAPI)
+      if (!normalized && bbox && source instanceof HTMLVideoElement) {
         const centerX = Math.round(width * 0.15);
-        const centerY = Math.round(height * 0.28);
+        const centerY = Math.round(height * 0.25);
         const centerW = Math.round(width * 0.70);
-        const centerH = Math.round(height * 0.44);
+        const centerH = Math.round(height * 0.50);
         const centerCanvas = this.preprocessPlateImage(srcCanvas, centerX, centerY, centerW, centerH);
-        result = await this.worker.recognize(centerCanvas);
-        rawText = result.data.text ? result.data.text.trim() : '';
+        const centerResult = await this.worker.recognize(centerCanvas);
+        const centerRaw = centerResult.data.text ? centerResult.data.text.trim() : '';
+        const centerNorm = centerRaw ? normalizePlateText(centerRaw) : null;
+        if (centerNorm) {
+          result = centerResult;
+          rawText = centerRaw;
+          activeCanvas = centerCanvas;
+          normalized = centerNorm;
+        }
+      }
+
+      // Fallback 2: Try tight lower bumper plate bracket (lower 35% of vehicle bbox)
+      if (!normalized && bbox && source instanceof HTMLVideoElement) {
+        const [vx, vy, vw, vh] = bbox;
+        const tightX = Math.max(0, Math.round(vx + vw * 0.15));
+        const tightY = Math.max(0, Math.round(vy + vh * 0.60));
+        const tightW = Math.min(width - tightX, Math.round(vw * 0.70));
+        const tightH = Math.min(height - tightY, Math.round(vh * 0.35));
+        if (tightW >= 30 && tightH >= 15) {
+          const tightCanvas = this.preprocessPlateImage(srcCanvas, tightX, tightY, tightW, tightH);
+          const tightResult = await this.worker.recognize(tightCanvas);
+          const tightRaw = tightResult.data.text ? tightResult.data.text.trim() : '';
+          const tightNorm = tightRaw ? normalizePlateText(tightRaw) : null;
+          if (tightNorm) {
+            result = tightResult;
+            rawText = tightRaw;
+            activeCanvas = tightCanvas;
+            normalized = tightNorm;
+          }
+        }
       }
 
       console.log('[ANPR OCR] Raw text recognized by Tesseract:', rawText);
-
-      if (!rawText) return null;
-
-      // Apply Guinea-Bissau, Senegal & International syntactic grammar correction
-      const normalized = normalizePlateText(rawText);
       console.log('[ANPR OCR] Normalized plate result:', normalized);
+
       if (!normalized) return null;
 
+      const cropDataUrl = activeCanvas.toDataURL('image/jpeg', 0.85);
       return {
         ...normalized,
         rawText,

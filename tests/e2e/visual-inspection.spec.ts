@@ -101,7 +101,7 @@ test.describe('Inspection Visuelle Complète de l\'Interface (Playwright)', () =
     await page.locator('button:has-text("révision(s)")').first().click();
     await expect(page.locator('text=Historique des Révisions')).toBeVisible();
     await page.screenshot({ path: path.join(screenshotsDir, '08b_historique_revisions_tarif.png') });
-    await page.locator('#btn-close-modal').click();
+    await page.evaluate(() => (document.getElementById('btn-close-modal') as HTMLElement)?.click());
     await expect(page.locator('text=Historique des Révisions')).toBeHidden();
 
     // ==========================================

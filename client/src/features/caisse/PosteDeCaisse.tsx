@@ -59,6 +59,9 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   const [isWebcamActive, setIsWebcamActive] = useState(false);
   const [isModelLoading, setIsModelLoading] = useState(false);
   const [liveDetection, setLiveDetection] = useState<VehicleDetectionResult | null>(null);
+  const [webcamPlateInput, setWebcamPlateInput] = useState<string>('');
+  const [isEditingPlate, setIsEditingPlate] = useState(false);
+  const [editPlateValue, setEditPlateValue] = useState('');
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<any>(null);
@@ -318,6 +321,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     aiVisionService.resetOcr();
     setIsWebcamActive(false);
     setLiveDetection(null);
+    setWebcamPlateInput('');
   };
 
   useEffect(() => {
@@ -326,12 +330,24 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     };
   }, []);
 
+  // Synchronize OCR recognized plate into manual input state
+  useEffect(() => {
+    if (liveDetection?.isOcrLiveRead && liveDetection.plateNumberSuggestion) {
+      setWebcamPlateInput(liveDetection.plateNumberSuggestion);
+    }
+  }, [liveDetection?.isOcrLiveRead, liveDetection?.plateNumberSuggestion]);
+
   const handleConfirmWebcamDetection = async () => {
     if (!liveDetection) return;
     setLoading(true);
     try {
-      const plate = liveDetection.plateNumberSuggestion || 'GB-4512-AZ';
-      const result = await api.detectVehicle(selectedLane, plate, liveDetection.categoryCode);
+      const finalPlate = (liveDetection.isOcrLiveRead ? liveDetection.plateNumberSuggestion : webcamPlateInput) ||
+        webcamPlateInput ||
+        liveDetection.plateNumberSuggestion ||
+        liveDetection.fallbackPlate ||
+        'GB-4512-AZ';
+
+      const result = await api.detectVehicle(selectedLane, finalPlate.trim().toUpperCase(), liveDetection.categoryCode);
       if (liveDetection.snapshotDataUrl) {
         result.vehicleImageUrl = liveDetection.snapshotDataUrl;
       }
@@ -564,19 +580,32 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                     </div>
 
                     {/* Center Optical LAPI Reticle */}
-                    <div className="absolute inset-x-[15%] inset-y-[28%] border-2 border-dashed border-amber-400/50 rounded-xl pointer-events-none flex flex-col justify-between p-2 shadow-[0_0_15px_rgba(251,191,36,0.15)] transition-all">
-                      <div className="flex justify-between items-center text-[10px] font-mono font-bold text-amber-300 bg-slate-950/80 px-2 py-0.5 rounded backdrop-blur-sm border border-amber-500/30">
+                    <div className={`absolute inset-x-[15%] inset-y-[25%] border-2 rounded-xl pointer-events-none flex flex-col justify-between p-2.5 transition-all duration-300 ${
+                      liveDetection?.isOcrLiveRead
+                        ? 'border-emerald-400 bg-emerald-500/10 shadow-[0_0_25px_rgba(52,211,153,0.35)]'
+                        : 'border-dashed border-amber-400/60 bg-amber-500/5 shadow-[0_0_15px_rgba(251,191,36,0.15)]'
+                    }`}>
+                      <div className={`flex justify-between items-center text-[10px] font-mono font-bold px-2 py-0.5 rounded backdrop-blur-sm border transition-colors ${
+                        liveDetection?.isOcrLiveRead
+                          ? 'text-emerald-300 bg-slate-950/90 border-emerald-500/40'
+                          : 'text-amber-300 bg-slate-950/80 border-amber-500/30'
+                      }`}>
                         <span>[ CIBLE LAPI / ANPR ]</span>
                         {liveDetection?.isOcrLiveRead ? (
                           <span className="text-emerald-400 font-extrabold flex items-center gap-1">
                             <span>✅ PLAQUE LUE :</span>
-                            <span className="text-white px-1 rounded bg-emerald-500/20">{liveDetection.plateNumberSuggestion}</span>
+                            <span className="text-white px-1.5 rounded bg-emerald-500/30 border border-emerald-400/50">{liveDetection.plateNumberSuggestion}</span>
                           </span>
                         ) : (
-                          <span className="text-amber-300 animate-pulse text-[9px]">Approcher la plaque au centre</span>
+                          <span className="text-amber-300 animate-pulse text-[9px] flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                            <span>Centrer la plaque dans le viseur</span>
+                          </span>
                         )}
                       </div>
-                      <div className="flex justify-between text-[10px] font-mono text-amber-400/70">
+                      <div className={`flex justify-between text-[10px] font-mono transition-colors ${
+                        liveDetection?.isOcrLiveRead ? 'text-emerald-400' : 'text-amber-400/70'
+                      }`}>
                         <span>└ ─ ─</span>
                         <span>─ ─ ┘</span>
                       </div>
@@ -584,44 +613,47 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
 
                     {/* AI Vehicle Detection Banner when an object is detected */}
                     {liveDetection && (
-                      <div className="absolute bottom-3 inset-x-3 bg-slate-900/95 backdrop-blur-md p-3 rounded-xl border border-emerald-500/50 flex items-center justify-between shadow-2xl">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-lg">
+                      <div className={`absolute bottom-3 inset-x-3 bg-slate-900/95 backdrop-blur-md p-3 rounded-xl border flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xl transition-all ${
+                        liveDetection.isOcrLiveRead ? 'border-emerald-500/80 shadow-emerald-500/10' : 'border-amber-500/50'
+                      }`}>
+                        <div className="flex items-center gap-3 w-full sm:w-auto">
+                          <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-lg ${
+                            liveDetection.isOcrLiveRead ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-300'
+                          }`}>
                             {liveDetection.categoryCode === 'CAT1' ? '🚖' : (liveDetection.categoryCode === 'CAT3' ? '🚌' : (liveDetection.categoryCode === 'CAT4' ? '🚚' : (liveDetection.categoryCode === 'CAT5' ? '🚛' : '🚗')))}
                           </div>
-                          <div className="text-left">
+                          <div className="text-left flex-1">
                             <div className="text-xs font-bold text-white flex items-center gap-2">
                               <span>[{liveDetection.categoryCode}] {liveDetection.categoryLabel}</span>
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">
                                 {liveDetection.confidence}%
                               </span>
                             </div>
-                            <div className="text-[11px] text-emerald-400 font-mono font-bold flex items-center gap-2 mt-0.5">
+                            <div className="text-[11px] text-emerald-400 font-mono font-bold flex flex-wrap items-center gap-2 mt-0.5">
                               <span>Tarif : {formatCurrency(liveDetection.tariff)} FCFA</span>
-                              {liveDetection.plateNumberSuggestion && (
-                                <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1.5 ${
-                                  liveDetection.isOcrLiveRead
-                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-sm'
-                                    : 'bg-slate-800 text-slate-400 border border-slate-700'
-                                }`}>
-                                  {liveDetection.isOcrLiveRead ? (
-                                    <>
-                                      <span className="text-amber-400">✨ LAPI OCR :</span>
-                                      <span className="text-white font-extrabold">{liveDetection.plateNumberSuggestion}</span>
-                                      {liveDetection.ocrCountryLabel && (
-                                        <span className="text-[9px] px-1 py-0.2 rounded bg-amber-400/20 text-amber-300 font-normal">
-                                          {liveDetection.ocrCountryLabel}
-                                        </span>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-                                      <span className="text-slate-300">Immat : {liveDetection.plateNumberSuggestion}</span>
-                                      <span className="text-[9px] text-amber-400/80 italic">(OCR en cours...)</span>
-                                    </>
+                              {liveDetection.isOcrLiveRead ? (
+                                <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-sm">
+                                  <span className="text-emerald-400">✨ LAPI OCR :</span>
+                                  <span className="text-white font-black">{liveDetection.plateNumberSuggestion}</span>
+                                  {liveDetection.ocrCountryLabel && (
+                                    <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-400/20 text-emerald-300 font-normal">
+                                      {liveDetection.ocrCountryLabel}
+                                    </span>
                                   )}
                                 </span>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                                  <span className="text-[10px] text-amber-300/90 font-mono">Plaque :</span>
+                                  <input
+                                    type="text"
+                                    value={webcamPlateInput}
+                                    onChange={(e) => setWebcamPlateInput(e.target.value.toUpperCase())}
+                                    placeholder={liveDetection.fallbackPlate || 'Ex: AB-093-FB'}
+                                    className="w-28 px-1.5 py-0.5 bg-slate-950 border border-slate-700 focus:border-amber-400 text-white font-mono text-[11px] rounded outline-none"
+                                  />
+                                  <span className="text-[9px] text-amber-400/80 italic">(OCR en cours...)</span>
+                                </div>
                               )}
                             </div>
                           </div>
@@ -631,9 +663,18 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                           type="button"
                           id="btn-confirm-webcam-vehicle"
                           onClick={handleConfirmWebcamDetection}
-                          className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-500/20 transition-all hover:scale-105"
+                          className={`w-full sm:w-auto px-4 py-2 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all hover:scale-105 flex items-center justify-center gap-2 ${
+                            liveDetection.isOcrLiveRead
+                              ? 'bg-emerald-400 hover:bg-emerald-300 shadow-emerald-500/30 font-black animate-pulse'
+                              : 'bg-emerald-500 hover:bg-emerald-400 shadow-emerald-500/20'
+                          }`}
                         >
-                          {t('validateWebcamVehicle')}
+                          <Zap className="w-3.5 h-3.5" />
+                          <span>
+                            {liveDetection.isOcrLiveRead
+                              ? `Valider ${liveDetection.plateNumberSuggestion}`
+                              : t('validateWebcamVehicle')}
+                          </span>
                         </button>
                       </div>
                     )}
@@ -812,23 +853,68 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                 {/* Plate & Recognition Info */}
                 <div className="flex flex-col justify-between space-y-3">
                   {/* Plate Badge Style Highway */}
-                  <div className="bg-white rounded-lg p-2.5 shadow-md flex items-center justify-center border-2 border-slate-300">
+                  <div className="bg-white rounded-lg p-2.5 shadow-md flex items-center justify-between border-2 border-slate-300">
                     <div className="flex items-center gap-3">
                       {detection.plateNumber.startsWith('GB') ? (
                         <div className="bg-emerald-700 text-amber-300 font-bold text-[10px] px-1.5 py-0.5 rounded flex flex-col items-center border border-emerald-600">
                           <span>★</span>
                           <span>GB</span>
                         </div>
-                      ) : (
+                      ) : (/^(DK|ZG|KD|TH|KL)/.test(detection.plateNumber)) ? (
                         <div className="bg-blue-800 text-white font-bold text-[10px] px-1.5 py-0.5 rounded flex flex-col items-center">
                           <span>★</span>
                           <span>SN</span>
                         </div>
+                      ) : (
+                        <div className="bg-slate-800 text-amber-300 font-bold text-[10px] px-1.5 py-0.5 rounded flex flex-col items-center border border-slate-700">
+                          <span>🌐</span>
+                          <span>INT</span>
+                        </div>
                       )}
-                      <span className="font-mono text-2xl font-black text-slate-900 tracking-wider">
-                        {detection.plateNumber}
-                      </span>
+
+                      {isEditingPlate ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={editPlateValue}
+                            onChange={(e) => setEditPlateValue(e.target.value.toUpperCase())}
+                            className="font-mono text-xl font-black text-slate-900 border border-slate-400 px-2 py-0.5 rounded uppercase outline-none focus:border-emerald-600"
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (editPlateValue.trim()) {
+                                setDetection(prev => prev ? { ...prev, plateNumber: editPlateValue.trim().toUpperCase() } : null);
+                              }
+                              setIsEditingPlate(false);
+                            }}
+                            className="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="font-mono text-2xl font-black text-slate-900 tracking-wider">
+                          {detection.plateNumber}
+                        </span>
+                      )}
                     </div>
+
+                    {!isEditingPlate && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditPlateValue(detection.plateNumber);
+                          setIsEditingPlate(true);
+                        }}
+                        className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1 px-2 py-1 hover:bg-slate-100 rounded transition-colors"
+                        title="Corriger la plaque"
+                      >
+                        <span>✏️</span>
+                        <span className="text-[10px] font-semibold">Modifier</span>
+                      </button>
+                    )}
                   </div>
 
                   <div className="bg-slate-800/60 rounded-xl p-3 space-y-1.5 text-xs">

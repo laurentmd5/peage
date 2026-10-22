@@ -148,7 +148,33 @@ export const api = {
     return request<AuditEvent[]>(`/audit/logs?${qs}`);
   },
 
-  // Hikvision Smart IPC LPR
+  // Caméra Réelle LAPI / ANPR (Multi-Marques: Hikvision, Dahua, Axis, ONVIF...)
+  getCameraStatus: () =>
+    request<{
+      status: string;
+      supportedVendors?: string[];
+      supportedModel?: string;
+      defaultCameraIp: string;
+      webhookEndpoint: string;
+      activeDetectionsCount: number;
+    }>('/toll/camera-status'),
+
+  getLatestCameraDetection: (laneId: string = 'VOIE-01') =>
+    request<{ laneId: string; detection: VehicleDetection | null }>(`/toll/camera-latest?laneId=${encodeURIComponent(laneId)}`),
+
+  simulateCameraWebhook: (payload?: {
+    plateNumber?: string;
+    vehicleType?: string;
+    confidence?: number;
+    laneId?: string;
+    vehicleImageUrl?: string;
+  }) =>
+    request<{ ResponseStatus: string; message: string; detection: VehicleDetection }>('/toll/camera-webhook/simulate', {
+      method: 'POST',
+      body: JSON.stringify(payload || {})
+    }),
+
+  // Aliases de compatibilité Hikvision Smart IPC
   getHikvisionStatus: () =>
     request<{
       status: string;

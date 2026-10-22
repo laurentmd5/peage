@@ -139,19 +139,19 @@ export function createTollRouter(
     }
   });
 
-  // 7. Webhook Réception Hikvision Smart IPC (DS-2CD4626FWD-IZHS/P)
-  router.post('/hikvision-webhook', async (req, res) => {
+  // 7. Webhook Réception Caméras Réelles LAPI / ANPR (Hikvision, Dahua, Axis, Multi-Marques)
+  router.post(['/camera-webhook', '/anpr-webhook', '/hikvision-webhook'], async (req, res) => {
     try {
       const parsed = parseHikvisionPayload(req.body);
       if (!parsed || !parsed.plateNumber) {
         res.status(400).json({
           ResponseStatus: 'INVALID_PAYLOAD',
-          message: 'No readable license plate in Hikvision payload'
+          message: 'No readable license plate in camera ANPR payload'
         });
         return;
       }
 
-      console.log(`[HIKVISION LPR] 🎥 Détection reçue pour ${parsed.laneId}: Plaque ${parsed.plateNumber} (${parsed.vehicleType} -> ${parsed.categoryCode}, conf: ${parsed.confidence}%)`);
+      console.log(`[CAMERA LAPI] 🎥 Détection reçue pour ${parsed.laneId}: Plaque ${parsed.plateNumber} (${parsed.vehicleType} -> ${parsed.categoryCode}, conf: ${parsed.confidence}%)`);
 
       const result = await detectUseCase.execute(parsed.laneId, parsed.plateNumber, parsed.categoryCode);
       if (parsed.vehicleImageUrl) {
@@ -161,6 +161,7 @@ export function createTollRouter(
 
       latestHikvisionDetections.set(parsed.laneId, result);
 
+      EventBroadcaster.broadcast('camera:vehicle-detected', result);
       EventBroadcaster.broadcast('hikvision:vehicle-detected', result);
       EventBroadcaster.broadcast('vehicle:detected', result);
 
@@ -168,17 +169,17 @@ export function createTollRouter(
         ResponseStatus: 'OK',
         statusCode: 1,
         statusString: 'OK',
-        message: 'Hikvision ANPR event processed successfully',
+        message: 'ANPR camera event processed successfully',
         detection: result
       });
     } catch (err: any) {
-      console.error('[HIKVISION LPR] Error processing webhook:', err);
+      console.error('[CAMERA LAPI] Error processing webhook:', err);
       res.status(500).json({ ResponseStatus: 'ERROR', message: err.message });
     }
   });
 
-  // 8. Simulation de réception Webhook Hikvision pour banc d'essai et techniciens
-  router.post('/hikvision-webhook/simulate', async (req, res) => {
+  // 8. Simulation de réception Webhook Caméra LAPI pour banc d'essai et techniciens
+  router.post(['/camera-webhook/simulate', '/anpr-webhook/simulate', '/hikvision-webhook/simulate'], async (req, res) => {
     try {
       const { plateNumber, vehicleType, confidence, laneId, vehicleImageUrl } = req.body || {};
       const plate = plateNumber || 'AB-864-HM';
@@ -207,13 +208,14 @@ export function createTollRouter(
 
       latestHikvisionDetections.set(parsed.laneId, result);
 
+      EventBroadcaster.broadcast('camera:vehicle-detected', result);
       EventBroadcaster.broadcast('hikvision:vehicle-detected', result);
       EventBroadcaster.broadcast('vehicle:detected', result);
 
       res.status(200).json({
         ResponseStatus: 'OK',
         statusCode: 1,
-        message: 'Hikvision simulation event triggered successfully',
+        message: 'Camera simulation event triggered successfully',
         detection: result
       });
     } catch (err: any) {
@@ -221,20 +223,22 @@ export function createTollRouter(
     }
   });
 
-  // 9. Récupération de la dernière détection reçue par la caméra Hikvision
-  router.get('/hikvision-latest', async (req, res) => {
+  // 9. Récupération de la dernière détection reçue par la caméra LAPI
+  router.get(['/camera-latest', '/anpr-latest', '/hikvision-latest'], async (req, res) => {
     const laneId = (req.query.laneId as string) || 'VOIE-01';
     const detection = latestHikvisionDetections.get(laneId) || null;
     res.json({ laneId, detection });
   });
 
-  // 10. Statut de la passerelle Hikvision LPR
-  router.get('/hikvision-status', async (_req, res) => {
+  // 10. Statut de la passerelle Caméra LAPI (Multi-Marques)
+  router.get(['/camera-status', '/anpr-status', '/hikvision-status'], async (_req, res) => {
     res.json({
       status: 'LISTENING',
-      supportedModel: 'DS-2CD4626FWD-IZHS/P',
+      supportedVendors: ['Hikvision (ISAPI)', 'Dahua (ANPR/ITC)', 'Axis (VAPIX/LPR)', 'Uniview', 'Standard HTTP/JSON ANPR'],
+      supportedModel: 'DS-2CD4626FWD-IZHS/P (Hikvision) & Multi-Marques',
       defaultCameraIp: '192.168.1.64',
-      webhookEndpoint: '/api/toll/hikvision-webhook',
+      webhookEndpoint: '/api/toll/camera-webhook',
+      hikvisionEndpoint: '/api/toll/hikvision-webhook',
       activeDetectionsCount: latestHikvisionDetections.size,
       time: new Date().toISOString()
     });

@@ -140,28 +140,76 @@ export function parseHikvisionPayload(body: any): ParsedHikvisionDetection | nul
   }
   // 2. Parsing if body is JSON object
   else if (typeof body === 'object') {
-    // Check PlateResult (Hikvision standard LPR notification)
+    // Check Hikvision standard structures (PlateResult or EventNotificationAlert)
     const pr = body.PlateResult || body.plateResult || body;
     const alert = body.EventNotificationAlert?.ANPR || body.EventNotificationAlert || {};
 
-    plate = pr.plateNumber || pr.licensePlate || alert.licensePlate || alert.plateNumber || body.plateNumber || body.plate || '';
-    conf = pr.confidence || pr.confidenceLevel || alert.confidenceLevel || body.confidence || 95;
-    vType = pr.carType || pr.vehicleType || alert.vehicleType || body.vehicleType || 'car';
-    ip = body.ipAddress || pr.ipAddress || '192.168.1.64';
-    dateTime = body.dateTime || pr.dateTime || new Date().toISOString();
+    // Check Dahua standard structures (Picture.Plate or TrafficCar)
+    const dahuaPlate = body.Picture?.Plate?.PlateNumber || body.TrafficCar?.PlateNumber || body.Plate?.PlateNumber;
+    const dahuaConf = body.Picture?.Plate?.Confidence || body.TrafficCar?.Confidence;
+    const dahuaType = body.TrafficCar?.VehicleType || body.Picture?.Plate?.VehicleType;
 
-    const rawLane = pr.laneNum || pr.channelID || body.channelID || body.laneId || 1;
+    // Check Axis / Generic LPR structures (LicensePlate, plate, Plate)
+    const genericPlate = body.LicensePlate || body.licensePlate || body.Plate || body.plate;
+
+    plate =
+      pr.plateNumber ||
+      pr.licensePlate ||
+      alert.licensePlate ||
+      alert.plateNumber ||
+      dahuaPlate ||
+      genericPlate ||
+      body.plateNumber ||
+      '';
+
+    conf =
+      pr.confidence ||
+      pr.confidenceLevel ||
+      alert.confidenceLevel ||
+      dahuaConf ||
+      body.confidence ||
+      body.Confidence ||
+      95;
+
+    vType =
+      pr.carType ||
+      pr.vehicleType ||
+      alert.vehicleType ||
+      dahuaType ||
+      body.vehicleType ||
+      body.carType ||
+      'car';
+
+    ip = body.ipAddress || pr.ipAddress || body.ip || '192.168.1.64';
+    dateTime = body.dateTime || pr.dateTime || body.time || new Date().toISOString();
+
+    const rawLane = pr.laneNum || pr.channelID || body.channelID || body.laneId || body.lane || 1;
     lane = typeof rawLane === 'string' && rawLane.startsWith('VOIE-') ? rawLane : `VOIE-0${rawLane}`;
 
-    // Images
-    const rawVehicleImg = pr.vehicleImageUrl || pr.pictureData || alert.vehiclePicture || body.vehicleImageUrl || body.snapshotDataUrl;
+    // Images (supports Hikvision, Dahua, Axis, and generic base64/URL fields)
+    const rawVehicleImg =
+      pr.vehicleImageUrl ||
+      pr.pictureData ||
+      alert.vehiclePicture ||
+      body.Picture?.SnapImage ||
+      body.vehicleImageUrl ||
+      body.vehicleImage ||
+      body.snapshotDataUrl;
+
     if (rawVehicleImg) {
       vehicleImg = rawVehicleImg.startsWith('data:') || rawVehicleImg.startsWith('http')
         ? rawVehicleImg
         : `data:image/jpeg;base64,${rawVehicleImg}`;
     }
 
-    const rawPlateImg = pr.plateImageUrl || pr.platePictureData || alert.platePicture || body.plateImageUrl;
+    const rawPlateImg =
+      pr.plateImageUrl ||
+      pr.platePictureData ||
+      alert.platePicture ||
+      body.Picture?.PlateImage ||
+      body.plateImageUrl ||
+      body.plateImage;
+
     if (rawPlateImg) {
       plateImg = rawPlateImg.startsWith('data:') || rawPlateImg.startsWith('http')
         ? rawPlateImg

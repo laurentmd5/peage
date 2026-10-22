@@ -361,17 +361,20 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     let eventSource: EventSource | null = null;
     try {
       eventSource = new EventSource('/api/dashboard/events');
-      eventSource.addEventListener('hikvision:vehicle-detected', (e: any) => {
+      const onVehicleDetected = (e: any) => {
         try {
           const detected = JSON.parse(e.data);
           if (detected) {
             setDetection(detected);
             setAmountPaid(detected.amountDue);
             setStep('DETECTED');
-            setHikvisionStatusMsg(`✅ Détection Hikvision reçue : ${detected.plateNumber} [${detected.categoryCode}]`);
+            setHikvisionStatusMsg(`✅ Détection caméra reçue : ${detected.plateNumber} [${detected.categoryCode}]`);
           }
         } catch (_) {}
-      });
+      };
+
+      eventSource.addEventListener('camera:vehicle-detected', onVehicleDetected);
+      eventSource.addEventListener('hikvision:vehicle-detected', onVehicleDetected);
       eventSource.addEventListener('vehicle:detected', (e: any) => {
         try {
           const detected = JSON.parse(e.data);
@@ -643,7 +646,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                   }`}
                 >
                   <Video className="w-3.5 h-3.5 text-blue-400" />
-                  <span>{t('modeHikvision')}</span>
+                  <span>{t('modeAnprCamera')}</span>
                 </button>
               </div>
 
@@ -842,13 +845,13 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         </div>
                         <div>
                           <div className="text-xs font-bold text-white flex items-center gap-2">
-                            <span>HIKVISION Smart IPC LPR</span>
+                            <span>{t('anprCameraTitle')}</span>
                             <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono text-[10px] border border-blue-500/40 font-bold">
-                              DS-2CD4626FWD-IZHS/P
+                              {t('anprCameraBadge')}
                             </span>
                           </div>
                           <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                            DarkFighter 2MP • Zoom 2.8-12mm • Voie : <span className="text-emerald-400 font-bold">{selectedLane}</span>
+                            {t('anprCameraSubtitle')} • Voie : <span className="text-emerald-400 font-bold">{selectedLane}</span>
                           </div>
                         </div>
                       </div>
@@ -873,7 +876,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                       {/* Background Optical Frame or Image */}
                       <img
                         src={`http://${hikvisionCameraIp}/ISAPI/Streaming/channels/101/picture?t=${Date.now()}`}
-                        alt="Hikvision Live Feed"
+                        alt="Camera Live Feed"
                         onError={(e) => {
                           (e.target as HTMLElement).style.display = 'none';
                         }}
@@ -885,10 +888,10 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         <div className="flex justify-between items-center text-[10px] font-mono">
                           <span className="px-2 py-0.5 rounded bg-slate-900/90 text-blue-300 border border-blue-500/30 flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                            <span>CAMÉRA VOIE CONNECTÉE</span>
+                            <span>{t('anprLaneConnected')}</span>
                           </span>
                           <span className="px-2 py-0.5 rounded bg-slate-900/90 text-emerald-300 border border-emerald-500/30">
-                            LPR DARKFIGHTER ACTIF
+                            {t('anprLiveOcrActive')}
                           </span>
                         </div>
 
@@ -896,13 +899,13 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         <div className="mx-auto w-3/4 h-24 border-2 border-dashed border-blue-400/60 rounded-xl flex items-center justify-center bg-blue-500/5">
                           <div className="text-[11px] font-mono text-blue-300 bg-slate-950/90 px-2.5 py-1 rounded border border-blue-500/30 flex items-center gap-1.5">
                             <Camera className="w-3.5 h-3.5 text-blue-400" />
-                            <span>ZONE DE LECTURE AUTOMATIQUE LAPI</span>
+                            <span>{t('anprDetectionZone')}</span>
                           </div>
                         </div>
 
                         <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
                           <span>VOIE : {selectedLane}</span>
-                          <span>DÉTECTION VÉHICULE EN ATTENTE...</span>
+                          <span>{t('anprWaitingVehicle')}</span>
                         </div>
                       </div>
                     </div>
@@ -911,10 +914,10 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                     <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2 text-slate-300">
                         <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                        <span>En attente de passage véhicule sur la voie...</span>
+                        <span>{t('anprWaitingVehicle')}</span>
                       </div>
                       <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
-                        100% AUTOMATISÉ
+                        {t('anprAutomatedBadge')}
                       </span>
                     </div>
                   </div>

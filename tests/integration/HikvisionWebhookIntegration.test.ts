@@ -85,6 +85,44 @@ describe('Hikvision Smart IPC LPR & Webhook Integration Tests', () => {
       expect(parsed?.categoryCode).toBe('CAT2');
       expect(parsed?.laneId).toBe('VOIE-01');
     });
+
+    it('should parse Dahua ANPR camera payload', () => {
+      const dahuaPayload = {
+        Picture: {
+          Plate: {
+            PlateNumber: 'AB-864-HM',
+            Confidence: 97,
+            VehicleType: 'car'
+          },
+          SnapImage: 'data:image/jpeg;base64,/9j/dahuaimg'
+        },
+        channelID: 1
+      };
+
+      const parsed = parseHikvisionPayload(dahuaPayload);
+      expect(parsed).not.toBeNull();
+      expect(parsed?.plateNumber).toBe('AB-864-HM');
+      expect(parsed?.confidence).toBe(97);
+      expect(parsed?.categoryCode).toBe('CAT2');
+      expect(parsed?.laneId).toBe('VOIE-01');
+      expect(parsed?.vehicleImageUrl).toBe('data:image/jpeg;base64,/9j/dahuaimg');
+    });
+
+    it('should parse Axis / Generic ANPR JSON payload', () => {
+      const axisPayload = {
+        LicensePlate: 'GB-4512-AZ',
+        confidence: 94,
+        vehicleType: 'bus',
+        laneId: 'VOIE-02'
+      };
+
+      const parsed = parseHikvisionPayload(axisPayload);
+      expect(parsed).not.toBeNull();
+      expect(parsed?.plateNumber).toBe('GB-4512-AZ');
+      expect(parsed?.confidence).toBe(94);
+      expect(parsed?.categoryCode).toBe('CAT3');
+      expect(parsed?.laneId).toBe('VOIE-02');
+    });
   });
 
   describe('Hikvision API Endpoints & Simulation', () => {
@@ -127,6 +165,14 @@ describe('Hikvision Smart IPC LPR & Webhook Integration Tests', () => {
         const statusData = await statusRes.json();
         expect(statusData.status).toBe('LISTENING');
         expect(statusData.supportedModel).toContain('DS-2CD4626FWD-IZHS/P');
+
+        // Check universal camera endpoints alias
+        const universalLatestRes = await fetch(`http://localhost:${port}/api/toll/camera-latest?laneId=VOIE-01`);
+        expect(universalLatestRes.status).toBe(200);
+        const universalStatusRes = await fetch(`http://localhost:${port}/api/toll/camera-status`);
+        expect(universalStatusRes.status).toBe(200);
+        const universalStatusData = await universalStatusRes.json();
+        expect(universalStatusData.supportedVendors).toContain('Dahua (ANPR/ITC)');
       } finally {
         server.close();
       }

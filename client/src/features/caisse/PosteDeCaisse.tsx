@@ -856,7 +856,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                       <div className="flex items-center gap-2 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
                         <span className="text-[10px] font-mono font-bold text-emerald-400">
-                          PASSERELLE LPR PRÊTE
+                          SURVEILLANCE ACTIVE
                         </span>
                       </div>
                     </div>
@@ -868,7 +868,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                       </div>
                     )}
 
-                    {/* Camera Live Preview & Optical Targeting (Option 1) */}
+                    {/* Camera Live Preview & Optical Targeting */}
                     <div className="relative rounded-xl overflow-hidden border border-blue-500/40 bg-black aspect-video flex items-center justify-center shadow-inner group">
                       {/* Background Optical Frame or Image */}
                       <img
@@ -884,11 +884,11 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                       <div className="absolute inset-0 flex flex-col justify-between p-3 pointer-events-none bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/60">
                         <div className="flex justify-between items-center text-[10px] font-mono">
                           <span className="px-2 py-0.5 rounded bg-slate-900/90 text-blue-300 border border-blue-500/30 flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
-                            <span>LIVE IP : {hikvisionCameraIp}:80</span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                            <span>CAMÉRA VOIE CONNECTÉE</span>
                           </span>
                           <span className="px-2 py-0.5 rounded bg-slate-900/90 text-emerald-300 border border-emerald-500/30">
-                            LPR DARKFIGHTER WDR 120dB
+                            LPR DARKFIGHTER ACTIF
                           </span>
                         </div>
 
@@ -896,59 +896,26 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         <div className="mx-auto w-3/4 h-24 border-2 border-dashed border-blue-400/60 rounded-xl flex items-center justify-center bg-blue-500/5">
                           <div className="text-[11px] font-mono text-blue-300 bg-slate-950/90 px-2.5 py-1 rounded border border-blue-500/30 flex items-center gap-1.5">
                             <Camera className="w-3.5 h-3.5 text-blue-400" />
-                            <span>ZONE DE LECTURE LAPI VOIE</span>
+                            <span>ZONE DE LECTURE AUTOMATIQUE LAPI</span>
                           </div>
                         </div>
 
                         <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
-                          <span>RTSP : rtsp://admin:***@{hikvisionCameraIp}:554</span>
-                          <span>OBTURATEUR : 1/1000s</span>
+                          <span>VOIE : {selectedLane}</span>
+                          <span>DÉTECTION VÉHICULE EN ATTENTE...</span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Webhook Status & Live Listener (Option 2) */}
-                    <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-semibold text-slate-200 flex items-center gap-1.5">
-                          <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                          <span>Écoute Événementielle Webhook ISAPI</span>
-                        </span>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
-                          HTTP POST 200 OK
-                        </span>
+                    {/* Clean Status Footer */}
+                    <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 text-slate-300">
+                        <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                        <span>En attente de passage véhicule sur la voie...</span>
                       </div>
-                      <div className="text-[11px] font-mono text-slate-300 bg-slate-950 p-2.5 rounded-lg border border-slate-800 break-all select-all">
-                        Point d'entrée : <span className="text-emerald-400 font-bold">http://[IP_PC_SERVEUR]:3001/api/toll/hikvision-webhook</span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
-                        Lorsque la caméra détecte une plaque, elle envoie le numéro et la photo en moins de 100ms. L'écran de caisse bascule automatiquement vers l'encaissement.
-                      </p>
-                    </div>
-
-                    {/* IP Setting & Technician Test Button */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-400 font-mono">IP Caméra :</span>
-                        <input
-                          type="text"
-                          value={hikvisionCameraIp}
-                          onChange={(e) => setHikvisionCameraIp(e.target.value)}
-                          className="w-32 px-2.5 py-1 bg-slate-900 border border-slate-700 rounded-lg text-xs font-mono text-white outline-none focus:border-blue-400 font-bold"
-                          placeholder="192.168.1.64"
-                        />
-                      </div>
-
-                      <button
-                        type="button"
-                        id="btn-simulate-hikvision"
-                        disabled={isTestingHikvision}
-                        onClick={handleTestHikvisionWebhook}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                      >
-                        <Zap className="w-3.5 h-3.5 text-amber-300" />
-                        <span>{isTestingHikvision ? 'Simulation en cours...' : 'Tester Réception Webhook (AB-864-HM)'}</span>
-                      </button>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                        100% AUTOMATISÉ
+                      </span>
                     </div>
                   </div>
                 </div>

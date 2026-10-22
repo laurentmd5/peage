@@ -563,6 +563,25 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                       <span>VISION IA TEMPS RÉEL (EDGE)</span>
                     </div>
 
+                    {/* Center Optical LAPI Reticle */}
+                    <div className="absolute inset-x-[15%] inset-y-[28%] border-2 border-dashed border-amber-400/50 rounded-xl pointer-events-none flex flex-col justify-between p-2 shadow-[0_0_15px_rgba(251,191,36,0.15)] transition-all">
+                      <div className="flex justify-between items-center text-[10px] font-mono font-bold text-amber-300 bg-slate-950/80 px-2 py-0.5 rounded backdrop-blur-sm border border-amber-500/30">
+                        <span>[ CIBLE LAPI / ANPR ]</span>
+                        {liveDetection?.isOcrLiveRead ? (
+                          <span className="text-emerald-400 font-extrabold flex items-center gap-1">
+                            <span>✅ PLAQUE LUE :</span>
+                            <span className="text-white px-1 rounded bg-emerald-500/20">{liveDetection.plateNumberSuggestion}</span>
+                          </span>
+                        ) : (
+                          <span className="text-amber-300 animate-pulse text-[9px]">Approcher la plaque au centre</span>
+                        )}
+                      </div>
+                      <div className="flex justify-between text-[10px] font-mono text-amber-400/70">
+                        <span>└ ─ ─</span>
+                        <span>─ ─ ┘</span>
+                      </div>
+                    </div>
+
                     {/* AI Vehicle Detection Banner when an object is detected */}
                     {liveDetection && (
                       <div className="absolute bottom-3 inset-x-3 bg-slate-900/95 backdrop-blur-md p-3 rounded-xl border border-emerald-500/50 flex items-center justify-between shadow-2xl">

@@ -59,6 +59,9 @@ class AIVisionService {
   private lastOcrCrop: string | null = null;
   private lastOcrCountryLabel: string | null = null;
   private lastOcrTimestamp = 0;
+  private lastDetectedCategoryCode: 'CAT1' | 'CAT2' | 'CAT3' | 'CAT4' | 'CAT5' | null = null;
+  private lastDetectedCategoryLabel: string | null = null;
+  private lastDetectedTariff: number | null = null;
 
   /**
    * Resets the ANPR OCR cache when starting a new vehicle passage
@@ -67,6 +70,9 @@ class AIVisionService {
     this.lastOcrPlate = null;
     this.lastOcrCrop = null;
     this.lastOcrCountryLabel = null;
+    this.lastDetectedCategoryCode = null;
+    this.lastDetectedCategoryLabel = null;
+    this.lastDetectedTariff = null;
     this.isOcrBusy = false;
   }
 
@@ -147,6 +153,53 @@ class AIVisionService {
       const vehiclePreds = predictions.filter((p: any) => vehicleClasses.includes(p.class) && p.score > 0.45);
 
       if (vehiclePreds.length === 0) {
+        // If no vehicle silhouette is in view, scan optical center reticle for close-up license plate
+        const now = Date.now();
+        if (!this.isOcrBusy && (now - this.lastOcrTimestamp > 1000)) {
+          this.isOcrBusy = true;
+          anprOcrService.recognizePlate(videoEl)
+            .then(ocrResult => {
+              if (ocrResult && ocrResult.plateNumber) {
+                this.lastOcrPlate = ocrResult.plateNumber;
+                this.lastOcrCrop = ocrResult.processedImageCrop || null;
+                this.lastOcrCountryLabel = ocrResult.countryLabel || null;
+              }
+              this.isOcrBusy = false;
+              this.lastOcrTimestamp = Date.now();
+            })
+            .catch(() => {
+              this.isOcrBusy = false;
+              this.lastOcrTimestamp = Date.now();
+            });
+        }
+
+        // If a plate was successfully read in close-up or previously locked
+        if (this.lastOcrPlate) {
+          const w = videoEl.videoWidth || 640;
+          const h = videoEl.videoHeight || 480;
+          const centerBbox: [number, number, number, number] = [w * 0.15, h * 0.28, w * 0.70, h * 0.44];
+
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (ctx) ctx.drawImage(videoEl, 0, 0);
+
+          return {
+            categoryCode: this.lastDetectedCategoryCode || 'CAT2',
+            categoryLabel: this.lastDetectedCategoryLabel || 'Catégorie 2 (Voitures & Pick-up double cabine)',
+            tariff: this.lastDetectedTariff || 500,
+            confidence: 95,
+            detectedObject: 'car',
+            bbox: centerBbox,
+            snapshotDataUrl: canvas.toDataURL('image/jpeg', 0.85),
+            plateNumberSuggestion: this.lastOcrPlate,
+            isOcrLiveRead: true,
+            plateCropUrl: this.lastOcrCrop || undefined,
+            ocrCountryLabel: this.lastOcrCountryLabel || undefined
+          };
+        }
+
         return null;
       }
 
@@ -156,7 +209,7 @@ class AIVisionService {
 
       // Asynchronously trigger background ANPR OCR recognition if cooldown has elapsed
       const now = Date.now();
-      if (!this.isOcrBusy && (now - this.lastOcrTimestamp > 1200)) {
+      if (!this.isOcrBusy && (now - this.lastOcrTimestamp > 1000)) {
         this.isOcrBusy = true;
         anprOcrService.recognizePlate(videoEl, best.bbox)
           .then(ocrResult => {
@@ -174,7 +227,11 @@ class AIVisionService {
           });
       }
 
-      return this.mapObjectToCategory(best.class, best.score, best.bbox, videoEl);
+      const res = this.mapObjectToCategory(best.class, best.score, best.bbox, videoEl);
+      this.lastDetectedCategoryCode = res.categoryCode;
+      this.lastDetectedCategoryLabel = res.categoryLabel;
+      this.lastDetectedTariff = res.tariff;
+      return res;
     } catch (err) {
       console.error('Inference error:', err);
       return this.heuristicFallbackDetection(videoEl);

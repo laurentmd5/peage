@@ -130,13 +130,19 @@ class AnprOcrService {
 
       if (bbox) {
         const [vx, vy, vw, vh] = bbox;
-        // The license plate is typically in the lower 45% and horizontally centered
-        cropX = Math.max(0, Math.round(vx + vw * 0.12));
-        cropY = Math.max(0, Math.round(vy + vh * 0.50));
-        cropW = Math.min(width - cropX, Math.round(vw * 0.76));
-        cropH = Math.min(height - cropY, Math.round(vh * 0.45));
+        // The license plate is typically in the lower portion of the detected vehicle
+        cropX = Math.max(0, Math.round(vx + vw * 0.10));
+        cropY = Math.max(0, Math.round(vy + vh * 0.45));
+        cropW = Math.min(width - cropX, Math.round(vw * 0.80));
+        cropH = Math.min(height - cropY, Math.round(vh * 0.50));
+      } else if (source instanceof HTMLVideoElement) {
+        // Target optical center region (Viseur LAPI) when presenting a plate in close-up
+        cropX = Math.round(width * 0.15);
+        cropY = Math.round(height * 0.28);
+        cropW = Math.round(width * 0.70);
+        cropH = Math.round(height * 0.44);
       } else {
-        // If image itself is already cropped or standalone plate, use entire canvas
+        // If image itself is already cropped or standalone plate canvas, use entire canvas
         cropX = 0;
         cropY = 0;
         cropW = width;
@@ -150,8 +156,20 @@ class AnprOcrService {
       const cropDataUrl = processedCanvas.toDataURL('image/jpeg', 0.85);
 
       // Perform OCR
-      const result = await this.worker.recognize(processedCanvas);
-      const rawText = result.data.text ? result.data.text.trim() : '';
+      let result = await this.worker.recognize(processedCanvas);
+      let rawText = result.data.text ? result.data.text.trim() : '';
+
+      // Fallback: If vehicle bbox was passed but OCR found nothing, try center reticle
+      if (!rawText && bbox && source instanceof HTMLVideoElement) {
+        const centerX = Math.round(width * 0.15);
+        const centerY = Math.round(height * 0.28);
+        const centerW = Math.round(width * 0.70);
+        const centerH = Math.round(height * 0.44);
+        const centerCanvas = this.preprocessPlateImage(srcCanvas, centerX, centerY, centerW, centerH);
+        result = await this.worker.recognize(centerCanvas);
+        rawText = result.data.text ? result.data.text.trim() : '';
+      }
+
       console.log('[ANPR OCR] Raw text recognized by Tesseract:', rawText);
 
       if (!rawText) return null;

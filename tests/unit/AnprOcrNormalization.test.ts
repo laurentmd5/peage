@@ -41,7 +41,7 @@ describe('ANPR / LAPI OCR Plate Normalization & Grammar Correction', () => {
     });
   });
 
-  describe('Senegal Regional Formats (DK-XXXX-YY)', () => {
+  describe('Senegal Regional Formats (DK-XXXX-YY, ZG Casamance border, KD Kolda)', () => {
     it('should normalize cleanly recognized Dakar plate', () => {
       const result = normalizePlateText('DK 1234 AA');
       expect(result).not.toBeNull();
@@ -53,6 +53,20 @@ describe('ANPR / LAPI OCR Plate Normalization & Grammar Correction', () => {
       const result = normalizePlateText('0K-5678-BB');
       expect(result).not.toBeNull();
       expect(result?.plateNumber).toBe('DK-5678-BB');
+      expect(result?.country).toBe('SN');
+    });
+
+    it('should normalize Ziguinchor Casamance border plate (ZG-XXXX-YY)', () => {
+      const result = normalizePlateText('ZG 7890 CC');
+      expect(result).not.toBeNull();
+      expect(result?.plateNumber).toBe('ZG-7890-CC');
+      expect(result?.country).toBe('SN');
+    });
+
+    it('should normalize Kolda border plate (KD-XXXX-YY)', () => {
+      const result = normalizePlateText('KD 3456 DD');
+      expect(result).not.toBeNull();
+      expect(result?.plateNumber).toBe('KD-3456-DD');
       expect(result?.country).toBe('SN');
     });
   });

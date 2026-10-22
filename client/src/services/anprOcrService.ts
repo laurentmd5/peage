@@ -232,39 +232,53 @@ export function normalizePlateText(raw: string): {
     };
   }
 
-  // 2. Senegal Match: DK + 3-4 digits + 1-2 letters
-  // Handle confusions for "DK": 0K, OK, Dk
-  let dkCandidate = clean;
-  if (/^(DK|0K|OK)/.test(dkCandidate)) {
-    dkCandidate = 'DK' + dkCandidate.substring(2);
+  // 2. Senegal Cross-Border Match: DK (Dakar), ZG (Ziguinchor Casamance), KD (Kolda), TH, KL
+  // Handles frequent OCR confusions for "DK": 0K, OK, Dk; for "ZG": 2G, 7G
+  let snPrefix: string | null = null;
+  let snRemainder = clean;
+
+  if (/^(DK|0K|OK)/i.test(snRemainder)) {
+    snPrefix = 'DK';
+    snRemainder = snRemainder.substring(2);
+  } else if (/^(ZG|2G|7G)/i.test(snRemainder)) {
+    snPrefix = 'ZG'; // Ziguinchor - principal point d'entrée transfrontalier Sénégal -> Guinée-Bissau
+    snRemainder = snRemainder.substring(2);
+  } else if (/^(KD|KO|K0)/i.test(snRemainder)) {
+    snPrefix = 'KD'; // Kolda - frontière est Guinée-Bissau
+    snRemainder = snRemainder.substring(2);
+  } else if (/^(TH|KL|SL)/i.test(snRemainder)) {
+    snPrefix = snRemainder.substring(0, 2).toUpperCase();
+    snRemainder = snRemainder.substring(2);
   }
 
-  const dkPattern = /^DK([0-9OIZSBL]{3,4})([A-Z0-9]{1,2})$/;
-  const dkMatch = dkCandidate.match(dkPattern);
-  if (dkMatch) {
-    const rawDigits = dkMatch[1];
-    const rawLetters = dkMatch[2];
+  if (snPrefix) {
+    const snPattern = /^([0-9OIZSBL]{3,4})([A-Z0-9]{1,2})$/;
+    const snMatch = snRemainder.match(snPattern);
+    if (snMatch) {
+      const rawDigits = snMatch[1];
+      const rawLetters = snMatch[2];
 
-    const correctedDigits = rawDigits
-      .replace(/O/g, '0')
-      .replace(/I|L/g, '1')
-      .replace(/Z/g, '2')
-      .replace(/S/g, '5')
-      .replace(/B/g, '8');
+      const correctedDigits = rawDigits
+        .replace(/O/g, '0')
+        .replace(/I|L/g, '1')
+        .replace(/Z/g, '2')
+        .replace(/S/g, '5')
+        .replace(/B/g, '8');
 
-    const correctedLetters = rawLetters
-      .replace(/0/g, 'O')
-      .replace(/1/g, 'I')
-      .replace(/2/g, 'Z')
-      .replace(/5/g, 'S')
-      .replace(/8/g, 'B');
+      const correctedLetters = rawLetters
+        .replace(/0/g, 'O')
+        .replace(/1/g, 'I')
+        .replace(/2/g, 'Z')
+        .replace(/5/g, 'S')
+        .replace(/8/g, 'B');
 
-    return {
-      plateNumber: `DK-${correctedDigits}-${correctedLetters}`,
-      confidence: 92,
-      country: 'SN',
-      countryLabel: '🇸🇳 Sénégal'
-    };
+      return {
+        plateNumber: `${snPrefix}-${correctedDigits}-${correctedLetters}`,
+        confidence: 93,
+        country: 'SN',
+        countryLabel: '🇸🇳 Sénégal'
+      };
+    }
   }
 
   // 3. Unprefixed plate format: 3-4 digits + 1-2 letters (Defaults to Guinea-Bissau for AREZKI BISSAU plaza)

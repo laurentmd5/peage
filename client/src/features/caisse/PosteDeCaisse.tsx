@@ -631,29 +631,33 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                             </div>
                             <div className="text-[11px] text-emerald-400 font-mono font-bold flex flex-wrap items-center gap-2 mt-0.5">
                               <span>Tarif : {formatCurrency(liveDetection.tariff)} FCFA</span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-[11px] text-slate-300 font-mono font-bold">Plaque :</span>
+                              <input
+                                type="text"
+                                id="input-webcam-plate"
+                                value={webcamPlateInput}
+                                onChange={(e) => setWebcamPlateInput(e.target.value.toUpperCase())}
+                                placeholder={liveDetection.plateNumberSuggestion || liveDetection.fallbackPlate || 'Ex: AB-093-FB'}
+                                className={`w-32 px-2 py-0.5 bg-slate-950 border font-mono font-bold text-xs rounded outline-none transition-colors ${
+                                  liveDetection.isOcrLiveRead
+                                    ? 'border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/50'
+                                    : 'border-slate-700 text-white focus:border-amber-400'
+                                }`}
+                              />
                               {liveDetection.isOcrLiveRead ? (
-                                <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-sm">
-                                  <span className="text-emerald-400">✨ LAPI OCR :</span>
-                                  <span className="text-white font-black">{liveDetection.plateNumberSuggestion}</span>
+                                <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                  <span>✨ LAPI</span>
                                   {liveDetection.ocrCountryLabel && (
-                                    <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-400/20 text-emerald-300 font-normal">
-                                      {liveDetection.ocrCountryLabel}
-                                    </span>
+                                    <span className="text-[9px] font-normal">{liveDetection.ocrCountryLabel}</span>
                                   )}
                                 </span>
                               ) : (
-                                <div className="flex items-center gap-1.5">
+                                <span className="text-[9px] text-amber-400 flex items-center gap-1 font-mono">
                                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-                                  <span className="text-[10px] text-amber-300/90 font-mono">Plaque :</span>
-                                  <input
-                                    type="text"
-                                    value={webcamPlateInput}
-                                    onChange={(e) => setWebcamPlateInput(e.target.value.toUpperCase())}
-                                    placeholder={liveDetection.fallbackPlate || 'Ex: AB-093-FB'}
-                                    className="w-28 px-1.5 py-0.5 bg-slate-950 border border-slate-700 focus:border-amber-400 text-white font-mono text-[11px] rounded outline-none"
-                                  />
-                                  <span className="text-[9px] text-amber-400/80 italic">(OCR en cours...)</span>
-                                </div>
+                                  <span>(Lecture OCR en cours...)</span>
+                                </span>
                               )}
                             </div>
                           </div>
@@ -663,17 +667,11 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                           type="button"
                           id="btn-confirm-webcam-vehicle"
                           onClick={handleConfirmWebcamDetection}
-                          className={`w-full sm:w-auto px-4 py-2 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all hover:scale-105 flex items-center justify-center gap-2 ${
-                            liveDetection.isOcrLiveRead
-                              ? 'bg-emerald-400 hover:bg-emerald-300 shadow-emerald-500/30 font-black animate-pulse'
-                              : 'bg-emerald-500 hover:bg-emerald-400 shadow-emerald-500/20'
-                          }`}
+                          className="w-full sm:w-auto px-4 py-2 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all hover:scale-105 flex items-center justify-center gap-2 bg-emerald-400 hover:bg-emerald-300 shadow-emerald-500/30 font-black"
                         >
                           <Zap className="w-3.5 h-3.5" />
                           <span>
-                            {liveDetection.isOcrLiveRead
-                              ? `Valider ${liveDetection.plateNumberSuggestion}`
-                              : t('validateWebcamVehicle')}
+                            Valider {webcamPlateInput || liveDetection.plateNumberSuggestion || 'Véhicule'}
                           </span>
                         </button>
                       </div>

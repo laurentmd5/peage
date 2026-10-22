@@ -269,7 +269,29 @@ class AnprOcrService {
 }
 
 /**
- * Normalizes and grammatically corrects OCR text to Guinea-Bissau (GB) or Senegal (DK) formats
+ * Normalizes and grammatically corrects OCR text to Guinea-Bissau (GB), Senegal (DK) or International transit formats
+ * Resolves standard OCR glyph confusions (e.g. 8 <-> B, 0 <-> O, 1 <-> I)
+ */
+function correctDigits(str: string): string {
+  return str
+    .replace(/O/g, '0')
+    .replace(/I|L/g, '1')
+    .replace(/Z/g, '2')
+    .replace(/S/g, '5')
+    .replace(/B/g, '8');
+}
+
+function correctLetters(str: string): string {
+  return str
+    .replace(/0/g, 'O')
+    .replace(/1/g, 'I')
+    .replace(/2/g, 'Z')
+    .replace(/5/g, 'S')
+    .replace(/8/g, 'B');
+}
+
+/**
+ * Normalizes and grammatically corrects OCR text to Guinea-Bissau (GB), Senegal (DK) or International transit formats
  * Resolves standard OCR glyph confusions (e.g. 8 <-> B, 0 <-> O, 1 <-> I)
  */
 export function normalizePlateText(raw: string): {
@@ -285,7 +307,6 @@ export function normalizePlateText(raw: string): {
   if (clean.length < 4) return null;
 
   // 1. Guinea-Bissau Match: GB + 3-4 digits + 1-2 letters
-  // Handle frequent OCR confusions for "GB": G8, 6B, 68, CB, QB
   let gbCandidate = clean;
   if (/^(GB|G8|6B|68|CB|QB)/.test(gbCandidate)) {
     gbCandidate = 'GB' + gbCandidate.substring(2);
@@ -297,32 +318,18 @@ export function normalizePlateText(raw: string): {
     const rawDigits = gbMatch[1];
     const rawLetters = gbMatch[2];
 
-    // Force digits in the middle
-    const correctedDigits = rawDigits
-      .replace(/O/g, '0')
-      .replace(/I|L/g, '1')
-      .replace(/Z/g, '2')
-      .replace(/S/g, '5')
-      .replace(/B/g, '8');
-
-    // Force letters in the suffix
-    const correctedLetters = rawLetters
-      .replace(/0/g, 'O')
-      .replace(/1/g, 'I')
-      .replace(/2/g, 'Z')
-      .replace(/5/g, 'S')
-      .replace(/8/g, 'B');
-
-    return {
-      plateNumber: `GB-${correctedDigits}-${correctedLetters}`,
-      confidence: 94,
-      country: 'GW',
-      countryLabel: '🇬🇼 Guinée-Bissau'
-    };
+    // Letter suffix must NOT contain unconvertible digits (e.g. 4, 3, 7, 6, 9)
+    if (!/[34679]/.test(rawLetters)) {
+      return {
+        plateNumber: `GB-${correctDigits(rawDigits)}-${correctLetters(rawLetters)}`,
+        confidence: 94,
+        country: 'GW',
+        countryLabel: '🇬🇼 Guinée-Bissau'
+      };
+    }
   }
 
   // 2. Senegal Cross-Border Match: DK (Dakar), ZG (Ziguinchor Casamance), KD (Kolda), TH, KL
-  // Handles frequent OCR confusions for "DK": 0K, OK, Dk; for "ZG": 2G, 7G
   let snPrefix: string | null = null;
   let snRemainder = clean;
 
@@ -330,10 +337,10 @@ export function normalizePlateText(raw: string): {
     snPrefix = 'DK';
     snRemainder = snRemainder.substring(2);
   } else if (/^(ZG|2G|7G)/i.test(snRemainder)) {
-    snPrefix = 'ZG'; // Ziguinchor - principal point d'entrée transfrontalier Sénégal -> Guinée-Bissau
+    snPrefix = 'ZG'; // Ziguinchor Casamance border
     snRemainder = snRemainder.substring(2);
   } else if (/^(KD|KO|K0)/i.test(snRemainder)) {
-    snPrefix = 'KD'; // Kolda - frontière est Guinée-Bissau
+    snPrefix = 'KD'; // Kolda border
     snRemainder = snRemainder.substring(2);
   } else if (/^(TH|KL|SL)/i.test(snRemainder)) {
     snPrefix = snRemainder.substring(0, 2).toUpperCase();
@@ -347,67 +354,36 @@ export function normalizePlateText(raw: string): {
       const rawDigits = snMatch[1];
       const rawLetters = snMatch[2];
 
-      const correctedDigits = rawDigits
-        .replace(/O/g, '0')
-        .replace(/I|L/g, '1')
-        .replace(/Z/g, '2')
-        .replace(/S/g, '5')
-        .replace(/B/g, '8');
-
-      const correctedLetters = rawLetters
-        .replace(/0/g, 'O')
-        .replace(/1/g, 'I')
-        .replace(/2/g, 'Z')
-        .replace(/5/g, 'S')
-        .replace(/8/g, 'B');
-
-      return {
-        plateNumber: `${snPrefix}-${correctedDigits}-${correctedLetters}`,
-        confidence: 93,
-        country: 'SN',
-        countryLabel: '🇸🇳 Sénégal'
-      };
+      // Suffix must be alphabetical (no unconvertible digits like 3, 4, 6, 7, 9)
+      if (!/[34679]/.test(rawLetters)) {
+        return {
+          plateNumber: `${snPrefix}-${correctDigits(rawDigits)}-${correctLetters(rawLetters)}`,
+          confidence: 93,
+          country: 'SN',
+          countryLabel: '🇸🇳 Sénégal'
+        };
+      }
     }
   }
 
-  // 3. International / Import format: 2 letters - 3 digits - 2 letters (e.g. AB-093-FB, common imported "Venant" vehicles)
-  const intlPattern = /^([A-Z0-9]{2})([0-9OIZSBL]{3})([A-Z0-9]{2})$/;
-  const intlMatch = clean.match(intlPattern);
+  // 3. International / European import format: 2 letters - 3 digits - 2 letters (e.g. AB-093-FB)
+  // Tolerates single euro-band letter prefix (F, L, D...) and trailing region digits (75, 13...)
+  const intlRegex = /^(?:[A-Z]{1})?([A-Z0-9]{2})([0-9OIZSBL]{3})([A-Z0-9]{2})(?:[0-9]{2})?$/;
+  const intlMatch = clean.match(intlRegex);
   if (intlMatch) {
     const rawPrefix = intlMatch[1];
     const rawDigits = intlMatch[2];
     const rawSuffix = intlMatch[3];
 
-    // Correct prefix letters (avoid digits in prefix)
-    const correctedPrefix = rawPrefix
-      .replace(/0/g, 'O')
-      .replace(/1/g, 'I')
-      .replace(/2/g, 'Z')
-      .replace(/5/g, 'S')
-      .replace(/8/g, 'B');
-
-    // Correct middle digits
-    const correctedDigits = rawDigits
-      .replace(/O/g, '0')
-      .replace(/I|L/g, '1')
-      .replace(/Z/g, '2')
-      .replace(/S/g, '5')
-      .replace(/B/g, '8');
-
-    // Correct suffix letters
-    const correctedSuffix = rawSuffix
-      .replace(/0/g, 'O')
-      .replace(/1/g, 'I')
-      .replace(/2/g, 'Z')
-      .replace(/5/g, 'S')
-      .replace(/8/g, 'B');
-
-    return {
-      plateNumber: `${correctedPrefix}-${correctedDigits}-${correctedSuffix}`,
-      confidence: 94,
-      country: 'UNKNOWN',
-      countryLabel: '🌐 Transit / Import'
-    };
+    // Suffix and prefix must be letters (avoid non-letter digits like 3, 4, 6, 7, 9)
+    if (!/[34679]/.test(rawPrefix) && !/[34679]/.test(rawSuffix)) {
+      return {
+        plateNumber: `${correctLetters(rawPrefix)}-${correctDigits(rawDigits)}-${correctLetters(rawSuffix)}`,
+        confidence: 94,
+        country: 'UNKNOWN',
+        countryLabel: '🌐 Transit / Import'
+      };
+    }
   }
 
   // 4. Unprefixed plate format: 3-4 digits + 1-2 letters (Defaults to Guinea-Bissau for AREZKI BISSAU plaza)
@@ -416,26 +392,15 @@ export function normalizePlateText(raw: string): {
     const rawDigits = genericMatch[1];
     const rawLetters = genericMatch[2];
 
-    const correctedDigits = rawDigits
-      .replace(/O/g, '0')
-      .replace(/I|L/g, '1')
-      .replace(/Z/g, '2')
-      .replace(/S/g, '5')
-      .replace(/B/g, '8');
-
-    const correctedLetters = rawLetters
-      .replace(/0/g, 'O')
-      .replace(/1/g, 'I')
-      .replace(/2/g, 'Z')
-      .replace(/5/g, 'S')
-      .replace(/8/g, 'B');
-
-    return {
-      plateNumber: `GB-${correctedDigits}-${correctedLetters}`,
-      confidence: 88,
-      country: 'GW',
-      countryLabel: '🇬🇼 Guinée-Bissau'
-    };
+    // Must be letters only in suffix (no unconvertible digits like 4, 3, 7, 6, 9)
+    if (!/[34679]/.test(rawLetters)) {
+      return {
+        plateNumber: `GB-${correctDigits(rawDigits)}-${correctLetters(rawLetters)}`,
+        confidence: 88,
+        country: 'GW',
+        countryLabel: '🇬🇼 Guinée-Bissau'
+      };
+    }
   }
 
   return null;

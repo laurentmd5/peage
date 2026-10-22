@@ -110,5 +110,18 @@ describe('ANPR / LAPI OCR Plate Normalization & Grammar Correction', () => {
     it('should reject non-plate strings', () => {
       expect(normalizePlateText('VOLVO TRUCK 500')).toBeNull();
     });
+
+    it('should reject plates with invalid digit suffix (e.g. GB 124 4 or 1244)', () => {
+      expect(normalizePlateText('GB 124 4')).toBeNull();
+      expect(normalizePlateText('1244')).toBeNull();
+      expect(normalizePlateText('GB-124-4')).toBeNull();
+    });
+
+    it('should cleanly extract international plate even with blue euro-band F and region code 75', () => {
+      const res = normalizePlateText('F AB 093 FB 75');
+      expect(res).not.toBeNull();
+      expect(res?.plateNumber).toBe('AB-093-FB');
+      expect(res?.countryLabel).toBe('🌐 Transit / Import');
+    });
   });
 });

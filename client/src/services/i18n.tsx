@@ -103,7 +103,12 @@ export const translations = {
 
   // Hardware & Real AI Edge Vision
   modeSimulation: { fr: 'Simulation Démo', en: 'Demo Simulation' },
-  modeWebcam: { fr: '📹 Caméra Réelle & Vision IA', en: '📹 Real Camera & AI Vision' },
+  modeWebcam: { fr: '📹 Webcam PC', en: '📹 PC Webcam' },
+  modeHikvision: { fr: '🎥 Caméra Hikvision LPR', en: '🎥 Hikvision LPR Camera' },
+  hikvisionModelTitle: { fr: 'HIKVISION Smart IPC DS-2CD4626FWD-IZHS/P (LPR Pro)', en: 'HIKVISION Smart IPC DS-2CD4626FWD-IZHS/P (LPR Pro)' },
+  hikvisionWebhookListening: { fr: '📡 Écoute Webhook active sur /api/toll/hikvision-webhook', en: '📡 Webhook listening on /api/toll/hikvision-webhook' },
+  hikvisionSimulateBtn: { fr: '⚡ Tester la liaison Webhook Hikvision', en: '⚡ Test Hikvision Webhook Connection' },
+  hikvisionLiveFeedLabel: { fr: 'Retour Optique Direct (Voie de Péage)', en: 'Direct Optical Feed (Toll Lane)' },
   startWebcamBtn: { fr: 'Activer la Webcam (Vision par Ordinateur)', en: 'Activate Webcam (Computer Vision)' },
   stopWebcamBtn: { fr: 'Arrêter la Caméra', en: 'Stop Camera' },
   autoPrintActive: { fr: 'Impression Auto : ACTIVE', en: 'Auto Print: ON' },

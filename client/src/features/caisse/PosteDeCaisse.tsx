@@ -55,7 +55,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   const [isAutoDemoRunning, setIsAutoDemoRunning] = useState(false);
 
   // Real Hardware: AI Vision & Live Webcam states
-  const [cameraMode, setCameraMode] = useState<'SIMULATION' | 'WEBCAM'>('SIMULATION');
+  const [cameraMode, setCameraMode] = useState<'SIMULATION' | 'WEBCAM' | 'HIKVISION'>('SIMULATION');
   const [isWebcamActive, setIsWebcamActive] = useState(false);
   const [isModelLoading, setIsModelLoading] = useState(false);
   const [liveDetection, setLiveDetection] = useState<VehicleDetectionResult | null>(null);
@@ -66,6 +66,11 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<any>(null);
+
+  // Real Hardware: Hikvision Smart IPC (DS-2CD4626FWD-IZHS/P) states
+  const [hikvisionCameraIp, setHikvisionCameraIp] = useState<string>('192.168.1.64');
+  const [isTestingHikvision, setIsTestingHikvision] = useState(false);
+  const [hikvisionStatusMsg, setHikvisionStatusMsg] = useState<string | null>(null);
 
   // Real Hardware: Printing states
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
@@ -351,6 +356,60 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     aiVisionService.unlockVehicle();
   };
 
+  // Listen for real-time Hikvision Webhook detections via Server-Sent Events (SSE)
+  useEffect(() => {
+    let eventSource: EventSource | null = null;
+    try {
+      eventSource = new EventSource('/api/dashboard/events');
+      eventSource.addEventListener('hikvision:vehicle-detected', (e: any) => {
+        try {
+          const detected = JSON.parse(e.data);
+          if (detected) {
+            setDetection(detected);
+            setAmountPaid(detected.amountDue);
+            setStep('DETECTED');
+            setHikvisionStatusMsg(`✅ Détection Hikvision reçue : ${detected.plateNumber} [${detected.categoryCode}]`);
+          }
+        } catch (_) {}
+      });
+      eventSource.addEventListener('vehicle:detected', (e: any) => {
+        try {
+          const detected = JSON.parse(e.data);
+          if (cameraMode === 'HIKVISION' && step === 'WAITING' && detected) {
+            setDetection(detected);
+            setAmountPaid(detected.amountDue);
+            setStep('DETECTED');
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
+
+    return () => {
+      if (eventSource) eventSource.close();
+    };
+  }, [cameraMode, step]);
+
+  const handleTestHikvisionWebhook = async () => {
+    setIsTestingHikvision(true);
+    setHikvisionStatusMsg(null);
+    try {
+      const res = await api.simulateHikvisionWebhook({
+        laneId: selectedLane,
+        plateNumber: 'AB-864-HM',
+        vehicleType: 'SUV',
+        confidence: 98
+      });
+      setDetection(res.detection);
+      setAmountPaid(res.detection.amountDue);
+      setStep('DETECTED');
+      setHikvisionStatusMsg('✅ Détection simulée reçue avec succès depuis la caméra Hikvision !');
+    } catch (err: any) {
+      setError(`Erreur simulation Hikvision: ${err.message}`);
+    } finally {
+      setIsTestingHikvision(false);
+    }
+  };
+
   const handleConfirmWebcamDetection = async () => {
     if (!liveDetection) return;
     setLoading(true);
@@ -535,8 +594,8 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
           {/* STEP 1: EN ATTENTE DE VÉHICULE */}
           {step === 'WAITING' && (
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-6">
-              {/* Mode Switcher: Demo Categories vs Live AI Camera (Webcam) */}
-              <div className="flex items-center justify-center gap-2 p-1 bg-slate-950/80 rounded-xl border border-slate-800 max-w-sm mx-auto">
+              {/* Mode Switcher: Demo Categories vs Live AI Camera (Webcam) vs Hikvision Smart IPC */}
+              <div className="flex items-center justify-center gap-1.5 p-1 bg-slate-950/80 rounded-xl border border-slate-800 max-w-lg mx-auto">
                 <button
                   type="button"
                   onClick={() => {
@@ -568,6 +627,23 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                 >
                   <Camera className="w-3.5 h-3.5 text-emerald-400" />
                   <span>{t('modeWebcam')}</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-switch-hikvision"
+                  onClick={() => {
+                    setCameraMode('HIKVISION');
+                    stopWebcam();
+                  }}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                    cameraMode === 'HIKVISION'
+                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm ring-1 ring-blue-500/30'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Video className="w-3.5 h-3.5 text-blue-400" />
+                  <span>{t('modeHikvision')}</span>
                 </button>
               </div>
 
@@ -750,6 +826,130 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         <span>{t('startWebcamBtn')}</span>
                       </button>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* VIEW 3: HIKVISION REAL INDUSTRIAL LPR CAMERA */}
+              {cameraMode === 'HIKVISION' && (
+                <div className="space-y-4 max-w-xl mx-auto text-left">
+                  <div className="bg-slate-950 border border-blue-500/40 rounded-2xl p-5 space-y-4 shadow-2xl">
+                    {/* Camera Header Banner */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold border border-blue-500/30">
+                          <Video className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-white flex items-center gap-2">
+                            <span>HIKVISION Smart IPC LPR</span>
+                            <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono text-[10px] border border-blue-500/40 font-bold">
+                              DS-2CD4626FWD-IZHS/P
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                            DarkFighter 2MP • Zoom 2.8-12mm • Voie : <span className="text-emerald-400 font-bold">{selectedLane}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                        <span className="text-[10px] font-mono font-bold text-emerald-400">
+                          PASSERELLE LPR PRÊTE
+                        </span>
+                      </div>
+                    </div>
+
+                    {hikvisionStatusMsg && (
+                      <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-2.5 text-emerald-300 text-xs flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>{hikvisionStatusMsg}</span>
+                      </div>
+                    )}
+
+                    {/* Camera Live Preview & Optical Targeting (Option 1) */}
+                    <div className="relative rounded-xl overflow-hidden border border-blue-500/40 bg-black aspect-video flex items-center justify-center shadow-inner group">
+                      {/* Background Optical Frame or Image */}
+                      <img
+                        src={`http://${hikvisionCameraIp}/ISAPI/Streaming/channels/101/picture?t=${Date.now()}`}
+                        alt="Hikvision Live Feed"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                        className="w-full h-full object-cover"
+                      />
+
+                      {/* Optical HUD Overlay */}
+                      <div className="absolute inset-0 flex flex-col justify-between p-3 pointer-events-none bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/60">
+                        <div className="flex justify-between items-center text-[10px] font-mono">
+                          <span className="px-2 py-0.5 rounded bg-slate-900/90 text-blue-300 border border-blue-500/30 flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                            <span>LIVE IP : {hikvisionCameraIp}:80</span>
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-slate-900/90 text-emerald-300 border border-emerald-500/30">
+                            LPR DARKFIGHTER WDR 120dB
+                          </span>
+                        </div>
+
+                        {/* Center Target Box */}
+                        <div className="mx-auto w-3/4 h-24 border-2 border-dashed border-blue-400/60 rounded-xl flex items-center justify-center bg-blue-500/5">
+                          <div className="text-[11px] font-mono text-blue-300 bg-slate-950/90 px-2.5 py-1 rounded border border-blue-500/30 flex items-center gap-1.5">
+                            <Camera className="w-3.5 h-3.5 text-blue-400" />
+                            <span>ZONE DE LECTURE LAPI VOIE</span>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
+                          <span>RTSP : rtsp://admin:***@{hikvisionCameraIp}:554</span>
+                          <span>OBTURATEUR : 1/1000s</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Webhook Status & Live Listener (Option 2) */}
+                    <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                          <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                          <span>Écoute Événementielle Webhook ISAPI</span>
+                        </span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                          HTTP POST 200 OK
+                        </span>
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-300 bg-slate-950 p-2.5 rounded-lg border border-slate-800 break-all select-all">
+                        Point d'entrée : <span className="text-emerald-400 font-bold">http://[IP_PC_SERVEUR]:3001/api/toll/hikvision-webhook</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Lorsque la caméra détecte une plaque, elle envoie le numéro et la photo en moins de 100ms. L'écran de caisse bascule automatiquement vers l'encaissement.
+                      </p>
+                    </div>
+
+                    {/* IP Setting & Technician Test Button */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400 font-mono">IP Caméra :</span>
+                        <input
+                          type="text"
+                          value={hikvisionCameraIp}
+                          onChange={(e) => setHikvisionCameraIp(e.target.value)}
+                          className="w-32 px-2.5 py-1 bg-slate-900 border border-slate-700 rounded-lg text-xs font-mono text-white outline-none focus:border-blue-400 font-bold"
+                          placeholder="192.168.1.64"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        id="btn-simulate-hikvision"
+                        disabled={isTestingHikvision}
+                        onClick={handleTestHikvisionWebhook}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-500/20 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-amber-300" />
+                        <span>{isTestingHikvision ? 'Simulation en cours...' : 'Tester Réception Webhook (AB-864-HM)'}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

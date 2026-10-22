@@ -6,6 +6,10 @@ import { ManualBarrierOpenUseCase } from '../../application/use-cases/ManualBarr
 import { ITransactionRepository } from '../../domain/repositories/ITransactionRepository.ts';
 import { AuthenticatedRequest, authMiddleware } from '../middlewares/AuthMiddleware.ts';
 import { EventBroadcaster } from '../../infrastructure/realtime/EventBroadcaster.ts';
+import { parseHikvisionPayload } from '../../infrastructure/hikvision/HikvisionWebhookParser.ts';
+
+// In-memory cache for latest Hikvision LPR detections per lane
+export const latestHikvisionDetections = new Map<string, any>();
 
 export function createTollRouter(
   detectUseCase: DetectVehicleUseCase,
@@ -133,6 +137,107 @@ export function createTollRouter(
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // 7. Webhook Réception Hikvision Smart IPC (DS-2CD4626FWD-IZHS/P)
+  router.post('/hikvision-webhook', async (req, res) => {
+    try {
+      const parsed = parseHikvisionPayload(req.body);
+      if (!parsed || !parsed.plateNumber) {
+        res.status(400).json({
+          ResponseStatus: 'INVALID_PAYLOAD',
+          message: 'No readable license plate in Hikvision payload'
+        });
+        return;
+      }
+
+      console.log(`[HIKVISION LPR] 🎥 Détection reçue pour ${parsed.laneId}: Plaque ${parsed.plateNumber} (${parsed.vehicleType} -> ${parsed.categoryCode}, conf: ${parsed.confidence}%)`);
+
+      const result = await detectUseCase.execute(parsed.laneId, parsed.plateNumber, parsed.categoryCode);
+      if (parsed.vehicleImageUrl) {
+        result.vehicleImageUrl = parsed.vehicleImageUrl;
+      }
+      result.confidence = parsed.confidence;
+
+      latestHikvisionDetections.set(parsed.laneId, result);
+
+      EventBroadcaster.broadcast('hikvision:vehicle-detected', result);
+      EventBroadcaster.broadcast('vehicle:detected', result);
+
+      res.status(200).json({
+        ResponseStatus: 'OK',
+        statusCode: 1,
+        statusString: 'OK',
+        message: 'Hikvision ANPR event processed successfully',
+        detection: result
+      });
+    } catch (err: any) {
+      console.error('[HIKVISION LPR] Error processing webhook:', err);
+      res.status(500).json({ ResponseStatus: 'ERROR', message: err.message });
+    }
+  });
+
+  // 8. Simulation de réception Webhook Hikvision pour banc d'essai et techniciens
+  router.post('/hikvision-webhook/simulate', async (req, res) => {
+    try {
+      const { plateNumber, vehicleType, confidence, laneId, vehicleImageUrl } = req.body || {};
+      const plate = plateNumber || 'AB-864-HM';
+      const vType = vehicleType || 'car';
+      const conf = confidence || 98;
+      const lane = laneId || 'VOIE-01';
+
+      const parsed = parseHikvisionPayload({
+        plateNumber: plate,
+        vehicleType: vType,
+        confidence: conf,
+        laneId: lane,
+        vehicleImageUrl: vehicleImageUrl || 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=500&auto=format&fit=crop&q=80'
+      });
+
+      if (!parsed) {
+        res.status(400).json({ error: 'Simulation payload could not be parsed' });
+        return;
+      }
+
+      const result = await detectUseCase.execute(parsed.laneId, parsed.plateNumber, parsed.categoryCode);
+      if (parsed.vehicleImageUrl) {
+        result.vehicleImageUrl = parsed.vehicleImageUrl;
+      }
+      result.confidence = parsed.confidence;
+
+      latestHikvisionDetections.set(parsed.laneId, result);
+
+      EventBroadcaster.broadcast('hikvision:vehicle-detected', result);
+      EventBroadcaster.broadcast('vehicle:detected', result);
+
+      res.status(200).json({
+        ResponseStatus: 'OK',
+        statusCode: 1,
+        message: 'Hikvision simulation event triggered successfully',
+        detection: result
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 9. Récupération de la dernière détection reçue par la caméra Hikvision
+  router.get('/hikvision-latest', async (req, res) => {
+    const laneId = (req.query.laneId as string) || 'VOIE-01';
+    const detection = latestHikvisionDetections.get(laneId) || null;
+    res.json({ laneId, detection });
+  });
+
+  // 10. Statut de la passerelle Hikvision LPR
+  router.get('/hikvision-status', async (_req, res) => {
+    res.json({
+      status: 'LISTENING',
+      supportedModel: 'DS-2CD4626FWD-IZHS/P',
+      defaultCameraIp: '192.168.1.64',
+      webhookEndpoint: '/api/toll/hikvision-webhook',
+      activeDetectionsCount: latestHikvisionDetections.size,
+      time: new Date().toISOString()
+    });
   });
 
   return router;

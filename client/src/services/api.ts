@@ -146,5 +146,30 @@ export const api = {
   getAuditLogs: (params: Record<string, string> = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request<AuditEvent[]>(`/audit/logs?${qs}`);
-  }
+  },
+
+  // Hikvision Smart IPC LPR
+  getHikvisionStatus: () =>
+    request<{
+      status: string;
+      supportedModel: string;
+      defaultCameraIp: string;
+      webhookEndpoint: string;
+      activeDetectionsCount: number;
+    }>('/toll/hikvision-status'),
+
+  getLatestHikvisionDetection: (laneId: string = 'VOIE-01') =>
+    request<{ laneId: string; detection: VehicleDetection | null }>(`/toll/hikvision-latest?laneId=${encodeURIComponent(laneId)}`),
+
+  simulateHikvisionWebhook: (payload?: {
+    plateNumber?: string;
+    vehicleType?: string;
+    confidence?: number;
+    laneId?: string;
+    vehicleImageUrl?: string;
+  }) =>
+    request<{ ResponseStatus: string; message: string; detection: VehicleDetection }>('/toll/hikvision-webhook/simulate', {
+      method: 'POST',
+      body: JSON.stringify(payload || {})
+    })
 };

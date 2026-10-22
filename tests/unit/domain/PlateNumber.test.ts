@@ -71,4 +71,17 @@ describe('PlateNumber Value Object', () => {
     expect(PlateNumber.isValidGuineaBissau(generatedGb)).toBe(true);
     expect(generatedGb.startsWith('GB-')).toBe(true);
   });
+
+  it('should format and recognize international import transit plates (e.g. AB-093-FB)', () => {
+    const import1 = new PlateNumber('ab-093-fb', 94);
+    expect(import1.value).toBe('AB-093-FB');
+    expect(import1.isImportTransit).toBe(true);
+
+    const import2 = new PlateNumber('AB 093 FB', 90);
+    expect(import2.value).toBe('AB-093-FB');
+    expect(import2.isImportTransit).toBe(true);
+
+    expect(PlateNumber.isValidInternationalImport('AB-093-FB')).toBe(true);
+    expect(PlateNumber.isValidInternationalImport('GB-1234-AB')).toBe(false);
+  });
 });

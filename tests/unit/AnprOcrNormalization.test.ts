@@ -71,6 +71,27 @@ describe('ANPR / LAPI OCR Plate Normalization & Grammar Correction', () => {
     });
   });
 
+  describe('International & Import Transit Formats (LL-NNN-LL, e.g. AB-093-FB)', () => {
+    it('should normalize cleanly recognized import plate AB-093-FB', () => {
+      const result = normalizePlateText('AB-093-FB');
+      expect(result).not.toBeNull();
+      expect(result?.plateNumber).toBe('AB-093-FB');
+      expect(result?.countryLabel).toBe('🌐 Transit / Import');
+    });
+
+    it('should correct glyph confusions on import plate (e.g. AB O93 FB with letter O)', () => {
+      const result = normalizePlateText('AB O93 FB');
+      expect(result).not.toBeNull();
+      expect(result?.plateNumber).toBe('AB-093-FB');
+    });
+
+    it('should normalize European format with dashes or spaces', () => {
+      const result = normalizePlateText('EF 456 GH');
+      expect(result).not.toBeNull();
+      expect(result?.plateNumber).toBe('EF-456-GH');
+    });
+  });
+
   describe('Unprefixed Short Formats (defaults to Plaza Guinea-Bissau GB)', () => {
     it('should normalize 4 digits + 2 letters to Guinea-Bissau standard', () => {
       const result = normalizePlateText('4512 AZ');

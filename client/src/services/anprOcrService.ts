@@ -281,7 +281,47 @@ export function normalizePlateText(raw: string): {
     }
   }
 
-  // 3. Unprefixed plate format: 3-4 digits + 1-2 letters (Defaults to Guinea-Bissau for AREZKI BISSAU plaza)
+  // 3. International / Import format: 2 letters - 3 digits - 2 letters (e.g. AB-093-FB, common imported "Venant" vehicles)
+  const intlPattern = /^([A-Z0-9]{2})([0-9OIZSBL]{3})([A-Z0-9]{2})$/;
+  const intlMatch = clean.match(intlPattern);
+  if (intlMatch) {
+    const rawPrefix = intlMatch[1];
+    const rawDigits = intlMatch[2];
+    const rawSuffix = intlMatch[3];
+
+    // Correct prefix letters (avoid digits in prefix)
+    const correctedPrefix = rawPrefix
+      .replace(/0/g, 'O')
+      .replace(/1/g, 'I')
+      .replace(/2/g, 'Z')
+      .replace(/5/g, 'S')
+      .replace(/8/g, 'B');
+
+    // Correct middle digits
+    const correctedDigits = rawDigits
+      .replace(/O/g, '0')
+      .replace(/I|L/g, '1')
+      .replace(/Z/g, '2')
+      .replace(/S/g, '5')
+      .replace(/8/g, 'B');
+
+    // Correct suffix letters
+    const correctedSuffix = rawSuffix
+      .replace(/0/g, 'O')
+      .replace(/1/g, 'I')
+      .replace(/2/g, 'Z')
+      .replace(/5/g, 'S')
+      .replace(/8/g, 'B');
+
+    return {
+      plateNumber: `${correctedPrefix}-${correctedDigits}-${correctedSuffix}`,
+      confidence: 94,
+      country: 'UNKNOWN',
+      countryLabel: '🌐 Transit / Import'
+    };
+  }
+
+  // 4. Unprefixed plate format: 3-4 digits + 1-2 letters (Defaults to Guinea-Bissau for AREZKI BISSAU plaza)
   const genericMatch = clean.match(/^([0-9OIZSBL]{3,4})([A-Z0-9]{1,2})$/);
   if (genericMatch) {
     const rawDigits = genericMatch[1];

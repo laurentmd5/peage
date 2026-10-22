@@ -16,6 +16,13 @@ export class PlateNumber {
    */
   static readonly GUINEA_BISSAU_REGEX = /^GB[- ]?(\d{3,4})[- ]?([A-Z]{1,2})$/i;
 
+  /**
+   * Expression régulière pour immatriculation internationale / véhicules d'occasion importés (format SIV LL-NNN-LL) :
+   * Format standard : AA-123-AA
+   * Exemple : AB-093-FB
+   */
+  static readonly INTERNATIONAL_IMPORT_REGEX = /^([A-Z]{2})[- ]?(\d{3})[- ]?([A-Z]{2})$/i;
+
   constructor(value: string, confidence: number = 95) {
     if (!value || typeof value !== 'string') {
       throw new Error(`Plaque d'immatriculation invalide: ${value}`);
@@ -40,10 +47,16 @@ export class PlateNumber {
       if (gbMatch) {
         cleaned = `GB-${gbMatch[1]}-${gbMatch[2].toUpperCase()}`;
       } else {
-        // Si saisie simplifiée de type 1234-AA ou 1234AA sans préfixe
-        const noPrefixMatch = cleaned.match(/^(\d{3,4})[- ]?([A-Z]{1,2})$/i);
-        if (noPrefixMatch) {
-          cleaned = `DK-${noPrefixMatch[1]}-${noPrefixMatch[2].toUpperCase()}`;
+        // Normalisation au format import international / transit (ex: AB-093-FB)
+        const intlMatch = cleaned.match(PlateNumber.INTERNATIONAL_IMPORT_REGEX);
+        if (intlMatch) {
+          cleaned = `${intlMatch[1].toUpperCase()}-${intlMatch[2]}-${intlMatch[3].toUpperCase()}`;
+        } else {
+          // Si saisie simplifiée de type 1234-AA ou 1234AA sans préfixe
+          const noPrefixMatch = cleaned.match(/^(\d{3,4})[- ]?([A-Z]{1,2})$/i);
+          if (noPrefixMatch) {
+            cleaned = `DK-${noPrefixMatch[1]}-${noPrefixMatch[2].toUpperCase()}`;
+          }
         }
       }
     }
@@ -74,6 +87,13 @@ export class PlateNumber {
     return PlateNumber.GUINEA_BISSAU_REGEX.test(this._value);
   }
 
+  /**
+   * Vérifie si la plaque respecte la norme d'immatriculation internationale / transit (LL-NNN-LL)
+   */
+  get isImportTransit(): boolean {
+    return PlateNumber.INTERNATIONAL_IMPORT_REGEX.test(this._value);
+  }
+
   static isValidSenegalDk(value: string): boolean {
     if (!value) return false;
     return PlateNumber.SENEGAL_DK_REGEX.test(value.trim()) || /^(\d{3,4})[- ]?([A-Z]{1,2})$/i.test(value.trim());
@@ -82,6 +102,11 @@ export class PlateNumber {
   static isValidGuineaBissau(value: string): boolean {
     if (!value) return false;
     return PlateNumber.GUINEA_BISSAU_REGEX.test(value.trim());
+  }
+
+  static isValidInternationalImport(value: string): boolean {
+    if (!value) return false;
+    return PlateNumber.INTERNATIONAL_IMPORT_REGEX.test(value.trim());
   }
 
   /**

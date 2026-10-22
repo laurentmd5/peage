@@ -79,23 +79,22 @@ class AnprOcrService {
     const imgData = ctx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
     const data = imgData.data;
 
-    // 1. Calculate average luminance for Otsu thresholding
-    let totalLum = 0;
-    const pixelCount = data.length / 4;
+    // High-contrast Grayscale with Dynamic Range Stretching (optimal for Tesseract LSTM)
+    let minLum = 255;
+    let maxLum = 0;
     for (let i = 0; i < data.length; i += 4) {
       const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      totalLum += lum;
+      if (lum < minLum) minLum = lum;
+      if (lum > maxLum) maxLum = lum;
     }
-    const avgLum = totalLum / pixelCount;
-    // Binarize: darker than threshold -> black (character), brighter -> white (plate background)
-    const threshold = Math.max(70, Math.min(180, avgLum * 0.95));
+    const range = Math.max(1, maxLum - minLum);
 
     for (let i = 0; i < data.length; i += 4) {
       const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-      const val = lum < threshold ? 0 : 255;
-      data[i] = val;
-      data[i + 1] = val;
-      data[i + 2] = val;
+      const stretched = Math.round(((lum - minLum) / range) * 255);
+      data[i] = stretched;
+      data[i + 1] = stretched;
+      data[i + 2] = stretched;
     }
 
     ctx.putImageData(imgData, 0, 0);
@@ -131,17 +130,17 @@ class AnprOcrService {
 
       if (bbox) {
         const [vx, vy, vw, vh] = bbox;
-        // The license plate is typically in the lower 35% and horizontally centered
-        cropX = Math.max(0, Math.round(vx + vw * 0.15));
-        cropY = Math.max(0, Math.round(vy + vh * 0.60));
-        cropW = Math.min(width - cropX, Math.round(vw * 0.70));
-        cropH = Math.min(height - cropY, Math.round(vh * 0.35));
+        // The license plate is typically in the lower 45% and horizontally centered
+        cropX = Math.max(0, Math.round(vx + vw * 0.12));
+        cropY = Math.max(0, Math.round(vy + vh * 0.50));
+        cropW = Math.min(width - cropX, Math.round(vw * 0.76));
+        cropH = Math.min(height - cropY, Math.round(vh * 0.45));
       } else {
-        // Fallback: central area
-        cropX = Math.round(width * 0.2);
-        cropY = Math.round(height * 0.35);
-        cropW = Math.round(width * 0.6);
-        cropH = Math.round(height * 0.3);
+        // If image itself is already cropped or standalone plate, use entire canvas
+        cropX = 0;
+        cropY = 0;
+        cropW = width;
+        cropH = height;
       }
 
       if (cropW < 20 || cropH < 10) return null;
@@ -153,11 +152,13 @@ class AnprOcrService {
       // Perform OCR
       const result = await this.worker.recognize(processedCanvas);
       const rawText = result.data.text ? result.data.text.trim() : '';
+      console.log('[ANPR OCR] Raw text recognized by Tesseract:', rawText);
 
       if (!rawText) return null;
 
-      // Apply Guinea-Bissau & Senegal syntactic grammar correction
+      // Apply Guinea-Bissau, Senegal & International syntactic grammar correction
       const normalized = normalizePlateText(rawText);
+      console.log('[ANPR OCR] Normalized plate result:', normalized);
       if (!normalized) return null;
 
       return {
@@ -303,7 +304,7 @@ export function normalizePlateText(raw: string): {
       .replace(/I|L/g, '1')
       .replace(/Z/g, '2')
       .replace(/S/g, '5')
-      .replace(/8/g, 'B');
+      .replace(/B/g, '8');
 
     // Correct suffix letters
     const correctedSuffix = rawSuffix

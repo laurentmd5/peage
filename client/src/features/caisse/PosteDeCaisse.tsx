@@ -580,13 +580,28 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                             <div className="text-[11px] text-emerald-400 font-mono font-bold flex items-center gap-2 mt-0.5">
                               <span>Tarif : {formatCurrency(liveDetection.tariff)} FCFA</span>
                               {liveDetection.plateNumberSuggestion && (
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold flex items-center gap-1 ${
+                                <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1.5 ${
                                   liveDetection.isOcrLiveRead
-                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
-                                    : 'bg-slate-800 text-slate-300 border border-slate-700'
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-sm'
+                                    : 'bg-slate-800 text-slate-400 border border-slate-700'
                                 }`}>
-                                  <span>{liveDetection.isOcrLiveRead ? '✨ LAPI :' : 'Plaque :'}</span>
-                                  <span className="text-white">{liveDetection.plateNumberSuggestion}</span>
+                                  {liveDetection.isOcrLiveRead ? (
+                                    <>
+                                      <span className="text-amber-400">✨ LAPI OCR :</span>
+                                      <span className="text-white font-extrabold">{liveDetection.plateNumberSuggestion}</span>
+                                      {liveDetection.ocrCountryLabel && (
+                                        <span className="text-[9px] px-1 py-0.2 rounded bg-amber-400/20 text-amber-300 font-normal">
+                                          {liveDetection.ocrCountryLabel}
+                                        </span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                                      <span className="text-slate-300">Immat : {liveDetection.plateNumberSuggestion}</span>
+                                      <span className="text-[9px] text-amber-400/80 italic">(OCR en cours...)</span>
+                                    </>
+                                  )}
                                 </span>
                               )}
                             </div>

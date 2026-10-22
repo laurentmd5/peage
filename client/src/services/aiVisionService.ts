@@ -18,6 +18,82 @@ export interface VehicleDetectionResult {
   isOcrLiveRead?: boolean;
   plateCropUrl?: string;
   ocrCountryLabel?: string;
+  isVehicleLocked?: boolean;
+  isPlateLocked?: boolean;
+}
+
+export interface PlateConsensusReading {
+  plateNumber: string;
+  confidence: number;
+  timestamp?: number;
+  countryLabel?: string;
+  crop?: string;
+}
+
+export interface PlateConsensusResult {
+  plateNumber: string;
+  confidence: number;
+  votes: number;
+  countryLabel?: string;
+  crop?: string;
+}
+
+/**
+ * Computes temporal majority voting consensus from a rolling buffer of OCR readings
+ * Discriminates against single-frame motion blur jitters and favors complete format plates
+ */
+export function computePlateConsensus(
+  readings: PlateConsensusReading[]
+): PlateConsensusResult | null {
+  if (!readings || readings.length === 0) return null;
+
+  const counts = new Map<string, { count: number; maxConf: number; countryLabel?: string; crop?: string }>();
+  for (const item of readings) {
+    if (!item.plateNumber) continue;
+    const entry = counts.get(item.plateNumber) || {
+      count: 0,
+      maxConf: 0,
+      countryLabel: item.countryLabel,
+      crop: item.crop
+    };
+    entry.count += 1;
+    entry.maxConf = Math.max(entry.maxConf, item.confidence);
+    if (item.countryLabel) entry.countryLabel = item.countryLabel;
+    if (item.crop) entry.crop = item.crop;
+    counts.set(item.plateNumber, entry);
+  }
+
+  let bestPlate = '';
+  let bestScore = -1;
+  let bestCount = 0;
+  let bestConf = 0;
+  let bestLabel: string | undefined;
+  let bestCrop: string | undefined;
+
+  counts.forEach((val, plate) => {
+    // Scoring: each vote = 100 points, max confidence = 0..100 points
+    // Complete 9-character plate bonus (e.g. AB-093-FB or GB-1234-AZ) = 25 points
+    const lengthBonus = plate.length >= 9 ? 25 : 0;
+    const score = val.count * 100 + val.maxConf + lengthBonus;
+    if (score > bestScore) {
+      bestScore = score;
+      bestPlate = plate;
+      bestCount = val.count;
+      bestConf = val.maxConf;
+      bestLabel = val.countryLabel;
+      bestCrop = val.crop;
+    }
+  });
+
+  if (!bestPlate) return null;
+
+  return {
+    plateNumber: bestPlate,
+    confidence: bestConf,
+    votes: bestCount,
+    countryLabel: bestLabel,
+    crop: bestCrop
+  };
 }
 
 /**
@@ -60,21 +136,69 @@ class AIVisionService {
   private lastOcrCrop: string | null = null;
   private lastOcrCountryLabel: string | null = null;
   private lastOcrTimestamp = 0;
-  private lastDetectedCategoryCode: 'CAT1' | 'CAT2' | 'CAT3' | 'CAT4' | 'CAT5' | null = null;
-  private lastDetectedCategoryLabel: string | null = null;
-  private lastDetectedTariff: number | null = null;
+
+  // Vehicle Snapshot & Category Freezing (Gel automatique du cliché véhicule dès détection)
+  private lockedVehicleSnapshot: string | null = null;
+  private lockedVehicleCategory: {
+    categoryCode: 'CAT1' | 'CAT2' | 'CAT3' | 'CAT4' | 'CAT5';
+    categoryLabel: string;
+    tariff: number;
+    detectedObject: string;
+    confidence: number;
+    bbox: [number, number, number, number];
+  } | null = null;
+
+  // Anti-drift OCR latching & temporal rolling consensus buffer
+  private lockedPlate: {
+    plateNumber: string;
+    countryLabel?: string;
+    crop?: string;
+    confidence: number;
+    timestamp: number;
+  } | null = null;
+
+  private ocrRollingBuffer: PlateConsensusReading[] = [];
 
   /**
-   * Resets the ANPR OCR cache when starting a new vehicle passage
+   * Resets the ANPR OCR cache and vehicle lock when starting a new vehicle passage
    */
   resetOcr(): void {
     this.lastOcrPlate = null;
     this.lastOcrCrop = null;
     this.lastOcrCountryLabel = null;
-    this.lastDetectedCategoryCode = null;
-    this.lastDetectedCategoryLabel = null;
-    this.lastDetectedTariff = null;
+    this.lockedVehicleSnapshot = null;
+    this.lockedVehicleCategory = null;
+    this.lockedPlate = null;
+    this.ocrRollingBuffer = [];
     this.isOcrBusy = false;
+  }
+
+  /**
+   * Unlocks the OCR plate reading to allow rescanning a different plate
+   */
+  unlockPlate(): void {
+    this.lockedPlate = null;
+    this.ocrRollingBuffer = [];
+  }
+
+  /**
+   * Unlocks the vehicle snapshot to allow recapturing the vehicle
+   */
+  unlockVehicle(): void {
+    this.lockedVehicleSnapshot = null;
+    this.lockedVehicleCategory = null;
+  }
+
+  isVehicleSnapshotLocked(): boolean {
+    return !!this.lockedVehicleSnapshot;
+  }
+
+  isPlateReadingLocked(): boolean {
+    return !!this.lockedPlate;
+  }
+
+  getLockedSnapshot(): string | null {
+    return this.lockedVehicleSnapshot;
   }
 
   /**
@@ -131,6 +255,113 @@ class AIVisionService {
   }
 
   /**
+   * Ingests a new OCR reading into the rolling consensus buffer and manages anti-drift latching
+   */
+  public handleNewOcrResult(res: {
+    plateNumber: string;
+    confidence: number;
+    countryLabel?: string;
+    processedImageCrop?: string;
+  }): void {
+    const now = Date.now();
+    this.lastOcrPlate = res.plateNumber;
+    this.lastOcrCrop = res.processedImageCrop || null;
+    this.lastOcrCountryLabel = res.countryLabel || null;
+
+    // 1. Ingest into rolling buffer
+    this.ocrRollingBuffer.push({
+      plateNumber: res.plateNumber,
+      confidence: res.confidence,
+      timestamp: now,
+      countryLabel: res.countryLabel,
+      crop: res.processedImageCrop
+    });
+
+    // 2. Keep last 6 readings within 5 seconds
+    this.ocrRollingBuffer = this.ocrRollingBuffer
+      .filter(item => (now - (item.timestamp || 0)) < 5000)
+      .slice(-6);
+
+    // 3. Compute temporal majority consensus
+    const consensus = computePlateConsensus(this.ocrRollingBuffer);
+    if (!consensus) return;
+
+    // 4. Anti-Drift Latching:
+    if (!this.lockedPlate) {
+      // First high-confidence read latches immediately
+      if (consensus.confidence >= 90) {
+        this.lockedPlate = {
+          plateNumber: consensus.plateNumber,
+          confidence: consensus.confidence,
+          countryLabel: consensus.countryLabel,
+          crop: consensus.crop,
+          timestamp: now
+        };
+        console.log('[ANPR OCR] 🔒 Anti-drift latch locked on plate:', this.lockedPlate.plateNumber);
+      }
+    } else {
+      // If already locked, prevent hand motion blur / occlusion from degrading plate (e.g. FB -> FI)
+      // Only replace if a new reading has 3+ consensus votes and confidence >= 92%
+      if (consensus.votes >= 3 && consensus.confidence >= 92 && consensus.plateNumber !== this.lockedPlate.plateNumber) {
+        console.log('[ANPR OCR] 🔄 Updating locked plate by consensus majority:', consensus.plateNumber);
+        this.lockedPlate = {
+          plateNumber: consensus.plateNumber,
+          confidence: consensus.confidence,
+          countryLabel: consensus.countryLabel,
+          crop: consensus.crop,
+          timestamp: now
+        };
+      }
+    }
+  }
+
+  /**
+   * Returns current active plate: prioritizing anti-drift locked plate, then rolling consensus
+   */
+  public getEffectivePlate(): { plateNumber: string; confidence: number; countryLabel?: string; crop?: string } | null {
+    if (this.lockedPlate) {
+      return this.lockedPlate;
+    }
+    const consensus = computePlateConsensus(this.ocrRollingBuffer);
+    if (consensus) {
+      return consensus;
+    }
+    if (this.lastOcrPlate) {
+      return {
+        plateNumber: this.lastOcrPlate,
+        confidence: 88,
+        countryLabel: this.lastOcrCountryLabel || undefined,
+        crop: this.lastOcrCrop || undefined
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Background asynchronous trigger for ANPR OCR recognition
+   */
+  private triggerBackgroundOcr(videoEl: HTMLVideoElement, bbox?: [number, number, number, number]): void {
+    const now = Date.now();
+    if (this.isOcrBusy || (now - this.lastOcrTimestamp < 500)) {
+      return;
+    }
+
+    this.isOcrBusy = true;
+    anprOcrService.recognizePlate(videoEl, bbox)
+      .then(ocrResult => {
+        if (ocrResult && ocrResult.plateNumber) {
+          this.handleNewOcrResult(ocrResult);
+        }
+        this.isOcrBusy = false;
+        this.lastOcrTimestamp = Date.now();
+      })
+      .catch(() => {
+        this.isOcrBusy = false;
+        this.lastOcrTimestamp = Date.now();
+      });
+  }
+
+  /**
    * Run real-time detection on a video frame
    */
   async detectFromVideo(videoEl: HTMLVideoElement): Promise<VehicleDetectionResult | null> {
@@ -138,11 +369,18 @@ class AIVisionService {
       return null;
     }
 
+    // Capture current live frame canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = videoEl.videoWidth;
+    canvas.height = videoEl.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.drawImage(videoEl, 0, 0);
+    const liveSnapshot = canvas.toDataURL('image/jpeg', 0.85);
+
     if (!this.model) {
       const loaded = await this.loadModel();
       if (!loaded) {
-        // Fallback edge heuristic when offline without cached TFJS model
-        return this.heuristicFallbackDetection(videoEl);
+        return this.heuristicFallbackDetection(videoEl, liveSnapshot);
       }
     }
 
@@ -153,89 +391,86 @@ class AIVisionService {
       const vehicleClasses = ['car', 'truck', 'bus', 'motorcycle', 'bicycle'];
       const vehiclePreds = predictions.filter((p: any) => vehicleClasses.includes(p.class) && p.score > 0.45);
 
-      if (vehiclePreds.length === 0) {
-        // If no vehicle silhouette is in view, scan optical center reticle for close-up license plate
-        const now = Date.now();
-        if (!this.isOcrBusy && (now - this.lastOcrTimestamp > 1000)) {
-          this.isOcrBusy = true;
-          anprOcrService.recognizePlate(videoEl)
-            .then(ocrResult => {
-              if (ocrResult && ocrResult.plateNumber) {
-                this.lastOcrPlate = ocrResult.plateNumber;
-                this.lastOcrCrop = ocrResult.processedImageCrop || null;
-                this.lastOcrCountryLabel = ocrResult.countryLabel || null;
-              }
-              this.isOcrBusy = false;
-              this.lastOcrTimestamp = Date.now();
-            })
-            .catch(() => {
-              this.isOcrBusy = false;
-              this.lastOcrTimestamp = Date.now();
-            });
-        }
+      // SCENARIO 1: Vehicle silhouette visible in camera frame
+      if (vehiclePreds.length > 0) {
+        vehiclePreds.sort((a: any, b: any) => b.score - a.score);
+        const best = vehiclePreds[0];
+        const res = this.mapObjectToCategory(best.class, best.score, best.bbox, videoEl, ctx, liveSnapshot);
 
-        // If a plate was successfully read in close-up or previously locked
-        if (this.lastOcrPlate) {
-          const w = videoEl.videoWidth || 640;
-          const h = videoEl.videoHeight || 480;
-          const centerBbox: [number, number, number, number] = [w * 0.15, h * 0.28, w * 0.70, h * 0.44];
-
-          const canvas = document.createElement('canvas');
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          if (ctx) ctx.drawImage(videoEl, 0, 0);
-
-          return {
-            categoryCode: this.lastDetectedCategoryCode || 'CAT2',
-            categoryLabel: this.lastDetectedCategoryLabel || 'Catégorie 2 (Voitures & Pick-up double cabine)',
-            tariff: this.lastDetectedTariff || 500,
-            confidence: 95,
-            detectedObject: 'car',
-            bbox: centerBbox,
-            snapshotDataUrl: canvas.toDataURL('image/jpeg', 0.85),
-            plateNumberSuggestion: this.lastOcrPlate,
-            isOcrLiveRead: true,
-            plateCropUrl: this.lastOcrCrop || undefined,
-            ocrCountryLabel: this.lastOcrCountryLabel || undefined
+        // FREEZE VEHICLE SNAPSHOT & CATEGORY on first high-confidence detection (Gel automatique)
+        if (!this.lockedVehicleSnapshot && res.confidence >= 55) {
+          this.lockedVehicleSnapshot = liveSnapshot;
+          this.lockedVehicleCategory = {
+            categoryCode: res.categoryCode,
+            categoryLabel: res.categoryLabel,
+            tariff: res.tariff,
+            detectedObject: res.detectedObject,
+            confidence: res.confidence,
+            bbox: res.bbox
           };
+          console.log('[AI Vision] 🔒 Gel automatique véhicule réussi:', res.categoryCode, res.categoryLabel);
         }
 
-        return null;
+        // Trigger background ANPR OCR recognition
+        this.triggerBackgroundOcr(videoEl, best.bbox);
+
+        const activePlate = this.getEffectivePlate();
+        return {
+          ...res,
+          snapshotDataUrl: this.lockedVehicleSnapshot || liveSnapshot,
+          plateNumberSuggestion: activePlate?.plateNumber || res.plateNumberSuggestion,
+          isOcrLiveRead: !!activePlate,
+          plateCropUrl: activePlate?.crop || this.lastOcrCrop || undefined,
+          ocrCountryLabel: activePlate?.countryLabel || this.lastOcrCountryLabel || undefined,
+          isVehicleLocked: !!this.lockedVehicleSnapshot,
+          isPlateLocked: !!this.lockedPlate
+        };
       }
 
-      // Pick highest score vehicle
-      vehiclePreds.sort((a: any, b: any) => b.score - a.score);
-      const best = vehiclePreds[0];
+      // SCENARIO 2: No vehicle silhouette detected in current frame
+      // (e.g. operator zoomed in close to the license plate with smartphone or moved hand)
+      this.triggerBackgroundOcr(videoEl);
 
-      // Asynchronously trigger background ANPR OCR recognition if cooldown has elapsed
-      const now = Date.now();
-      if (!this.isOcrBusy && (now - this.lastOcrTimestamp > 1000)) {
-        this.isOcrBusy = true;
-        anprOcrService.recognizePlate(videoEl, best.bbox)
-          .then(ocrResult => {
-            if (ocrResult && ocrResult.plateNumber) {
-              this.lastOcrPlate = ocrResult.plateNumber;
-              this.lastOcrCrop = ocrResult.processedImageCrop || null;
-              this.lastOcrCountryLabel = ocrResult.countryLabel || null;
-            }
-            this.isOcrBusy = false;
-            this.lastOcrTimestamp = Date.now();
-          })
-          .catch(() => {
-            this.isOcrBusy = false;
-            this.lastOcrTimestamp = Date.now();
-          });
+      const activePlate = this.getEffectivePlate();
+
+      // If we already have a locked vehicle category or an active plate read, maintain passage state:
+      if (this.lockedVehicleCategory || activePlate) {
+        const cat = this.lockedVehicleCategory || {
+          categoryCode: 'CAT2' as const,
+          categoryLabel: 'Catégorie 2 (Voitures & Pick-up double cabine)',
+          tariff: 500,
+          detectedObject: 'car',
+          confidence: 95,
+          bbox: [
+            Math.round(videoEl.videoWidth * 0.15),
+            Math.round(videoEl.videoHeight * 0.28),
+            Math.round(videoEl.videoWidth * 0.70),
+            Math.round(videoEl.videoHeight * 0.44)
+          ] as [number, number, number, number]
+        };
+
+        return {
+          categoryCode: cat.categoryCode,
+          categoryLabel: cat.categoryLabel,
+          tariff: cat.tariff,
+          confidence: cat.confidence,
+          detectedObject: cat.detectedObject,
+          bbox: cat.bbox,
+          snapshotDataUrl: this.lockedVehicleSnapshot || liveSnapshot,
+          plateNumberSuggestion: activePlate?.plateNumber || this.lastOcrPlate || '',
+          fallbackPlate: 'GB-4512-AZ',
+          isOcrLiveRead: !!activePlate,
+          plateCropUrl: activePlate?.crop || this.lastOcrCrop || undefined,
+          ocrCountryLabel: activePlate?.countryLabel || this.lastOcrCountryLabel || undefined,
+          isVehicleLocked: !!this.lockedVehicleSnapshot,
+          isPlateLocked: !!this.lockedPlate
+        };
       }
 
-      const res = this.mapObjectToCategory(best.class, best.score, best.bbox, videoEl);
-      this.lastDetectedCategoryCode = res.categoryCode;
-      this.lastDetectedCategoryLabel = res.categoryLabel;
-      this.lastDetectedTariff = res.tariff;
-      return res;
+      return null;
     } catch (err) {
       console.error('Inference error:', err);
-      return this.heuristicFallbackDetection(videoEl);
+      return this.heuristicFallbackDetection(videoEl, liveSnapshot);
     }
   }
 
@@ -246,22 +481,18 @@ class AIVisionService {
     objectClass: string,
     score: number,
     bbox: [number, number, number, number],
-    videoEl: HTMLVideoElement
+    videoEl: HTMLVideoElement,
+    ctx: CanvasRenderingContext2D | null,
+    liveSnapshot: string
   ): VehicleDetectionResult {
     const [x, y, w, h] = bbox;
     const confidencePct = Math.round(score * 100);
     const aspectRatio = w / Math.max(h, 1);
-    const isOcrLive = !!this.lastOcrPlate;
+    const activePlate = this.getEffectivePlate();
+    const isOcrLive = !!activePlate;
 
-    // Capture snapshot frame
-    const canvas = document.createElement('canvas');
-    canvas.width = videoEl.videoWidth;
-    canvas.height = videoEl.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.drawImage(videoEl, 0, 0);
-    }
-    const snapshotDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    // Snapshot: use locked vehicle photo if available, otherwise live frame
+    const snapshotDataUrl = this.lockedVehicleSnapshot || liveSnapshot;
 
     // Cat 1: Motorcycle, trycicle, or Taxi
     if (objectClass === 'motorcycle' || objectClass === 'bicycle') {
@@ -273,11 +504,13 @@ class AIVisionService {
         detectedObject: objectClass,
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: this.lastOcrPlate || '',
+        plateNumberSuggestion: activePlate?.plateNumber || this.lastOcrPlate || '',
         fallbackPlate: 'GB-1020-MC',
         isOcrLiveRead: isOcrLive,
-        plateCropUrl: this.lastOcrCrop || undefined,
-        ocrCountryLabel: this.lastOcrCountryLabel || undefined
+        plateCropUrl: activePlate?.crop || this.lastOcrCrop || undefined,
+        ocrCountryLabel: activePlate?.countryLabel || this.lastOcrCountryLabel || undefined,
+        isVehicleLocked: !!this.lockedVehicleSnapshot,
+        isPlateLocked: !!this.lockedPlate
       };
     }
 
@@ -291,11 +524,13 @@ class AIVisionService {
         detectedObject: 'bus',
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: this.lastOcrPlate || '',
+        plateNumberSuggestion: activePlate?.plateNumber || this.lastOcrPlate || '',
         fallbackPlate: 'GB-6789-DX',
         isOcrLiveRead: isOcrLive,
-        plateCropUrl: this.lastOcrCrop || undefined,
-        ocrCountryLabel: this.lastOcrCountryLabel || undefined
+        plateCropUrl: activePlate?.crop || this.lastOcrCrop || undefined,
+        ocrCountryLabel: activePlate?.countryLabel || this.lastOcrCountryLabel || undefined,
+        isVehicleLocked: !!this.lockedVehicleSnapshot,
+        isPlateLocked: !!this.lockedPlate
       };
     }
 
@@ -312,11 +547,13 @@ class AIVisionService {
           detectedObject: 'semi-trailer',
           bbox,
           snapshotDataUrl,
-          plateNumberSuggestion: this.lastOcrPlate || '',
+          plateNumberSuggestion: activePlate?.plateNumber || this.lastOcrPlate || '',
           fallbackPlate: 'GB-9900-HB',
           isOcrLiveRead: isOcrLive,
-          plateCropUrl: this.lastOcrCrop || undefined,
-          ocrCountryLabel: this.lastOcrCountryLabel || undefined
+          plateCropUrl: activePlate?.crop || this.lastOcrCrop || undefined,
+          ocrCountryLabel: activePlate?.countryLabel || this.lastOcrCountryLabel || undefined,
+          isVehicleLocked: !!this.lockedVehicleSnapshot,
+          isPlateLocked: !!this.lockedPlate
         };
       }
       return {
@@ -327,11 +564,13 @@ class AIVisionService {
         detectedObject: 'truck',
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: this.lastOcrPlate || '',
+        plateNumberSuggestion: activePlate?.plateNumber || this.lastOcrPlate || '',
         fallbackPlate: 'GB-8765-BZ',
         isOcrLiveRead: isOcrLive,
-        plateCropUrl: this.lastOcrCrop || undefined,
-        ocrCountryLabel: this.lastOcrCountryLabel || undefined
+        plateCropUrl: activePlate?.crop || this.lastOcrCrop || undefined,
+        ocrCountryLabel: activePlate?.countryLabel || this.lastOcrCountryLabel || undefined,
+        isVehicleLocked: !!this.lockedVehicleSnapshot,
+        isPlateLocked: !!this.lockedPlate
       };
     }
 
@@ -347,11 +586,13 @@ class AIVisionService {
         detectedObject: 'taxi',
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: this.lastOcrPlate || '',
+        plateNumberSuggestion: activePlate?.plateNumber || this.lastOcrPlate || '',
         fallbackPlate: 'GB-2345-AF',
         isOcrLiveRead: isOcrLive,
-        plateCropUrl: this.lastOcrCrop || undefined,
-        ocrCountryLabel: this.lastOcrCountryLabel || undefined
+        plateCropUrl: activePlate?.crop || this.lastOcrCrop || undefined,
+        ocrCountryLabel: activePlate?.countryLabel || this.lastOcrCountryLabel || undefined,
+        isVehicleLocked: !!this.lockedVehicleSnapshot,
+        isPlateLocked: !!this.lockedPlate
       };
     }
 
@@ -363,11 +604,13 @@ class AIVisionService {
       detectedObject: 'car',
       bbox,
       snapshotDataUrl,
-      plateNumberSuggestion: this.lastOcrPlate || '',
+      plateNumberSuggestion: activePlate?.plateNumber || this.lastOcrPlate || '',
       fallbackPlate: 'GB-4512-AZ',
       isOcrLiveRead: isOcrLive,
-      plateCropUrl: this.lastOcrCrop || undefined,
-      ocrCountryLabel: this.lastOcrCountryLabel || undefined
+      plateCropUrl: activePlate?.crop || this.lastOcrCrop || undefined,
+      ocrCountryLabel: activePlate?.countryLabel || this.lastOcrCountryLabel || undefined,
+      isVehicleLocked: !!this.lockedVehicleSnapshot,
+      isPlateLocked: !!this.lockedPlate
     };
   }
 
@@ -408,28 +651,42 @@ class AIVisionService {
   /**
    * Heuristic fallback if offline without CDN access
    */
-  private heuristicFallbackDetection(videoEl: HTMLVideoElement): VehicleDetectionResult {
+  private heuristicFallbackDetection(videoEl: HTMLVideoElement, liveSnapshot?: string): VehicleDetectionResult {
     const w = videoEl.videoWidth || 640;
     const h = videoEl.videoHeight || 480;
     const bbox: [number, number, number, number] = [w * 0.15, h * 0.2, w * 0.7, h * 0.6];
 
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (ctx) ctx.drawImage(videoEl, 0, 0);
+    let snap = liveSnapshot;
+    if (!snap) {
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.drawImage(videoEl, 0, 0);
+      snap = canvas.toDataURL('image/jpeg', 0.8);
+    }
+
+    if (!this.lockedVehicleSnapshot) {
+      this.lockedVehicleSnapshot = snap;
+    }
+
+    const activePlate = this.getEffectivePlate();
 
     return {
-      categoryCode: 'CAT2',
-      categoryLabel: 'Catégorie 2 (Voitures & Pick-up double cabine)',
-      tariff: 500,
+      categoryCode: this.lockedVehicleCategory?.categoryCode || 'CAT2',
+      categoryLabel: this.lockedVehicleCategory?.categoryLabel || 'Catégorie 2 (Voitures & Pick-up double cabine)',
+      tariff: this.lockedVehicleCategory?.tariff || 500,
       confidence: 88,
       detectedObject: 'car',
       bbox,
-      snapshotDataUrl: canvas.toDataURL('image/jpeg', 0.8),
-      plateNumberSuggestion: this.lastOcrPlate || '',
+      snapshotDataUrl: this.lockedVehicleSnapshot || snap,
+      plateNumberSuggestion: activePlate?.plateNumber || this.lastOcrPlate || '',
       fallbackPlate: 'GB-4512-AZ',
-      isOcrLiveRead: !!this.lastOcrPlate
+      isOcrLiveRead: !!activePlate || !!this.lastOcrPlate,
+      plateCropUrl: activePlate?.crop || this.lastOcrCrop || undefined,
+      ocrCountryLabel: activePlate?.countryLabel || this.lastOcrCountryLabel || undefined,
+      isVehicleLocked: !!this.lockedVehicleSnapshot,
+      isPlateLocked: !!this.lockedPlate
     };
   }
 }

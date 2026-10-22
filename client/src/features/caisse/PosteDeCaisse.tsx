@@ -60,6 +60,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   const [isModelLoading, setIsModelLoading] = useState(false);
   const [liveDetection, setLiveDetection] = useState<VehicleDetectionResult | null>(null);
   const [webcamPlateInput, setWebcamPlateInput] = useState<string>('');
+  const [isPlateManuallyEdited, setIsPlateManuallyEdited] = useState(false);
   const [isEditingPlate, setIsEditingPlate] = useState(false);
   const [editPlateValue, setEditPlateValue] = useState('');
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -322,6 +323,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     setIsWebcamActive(false);
     setLiveDetection(null);
     setWebcamPlateInput('');
+    setIsPlateManuallyEdited(false);
   };
 
   useEffect(() => {
@@ -330,24 +332,35 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     };
   }, []);
 
-  // Synchronize OCR recognized plate into manual input state
+  // Synchronize OCR recognized plate into manual input state (only if cashier hasn't manually edited)
   useEffect(() => {
     if (liveDetection?.isOcrLiveRead && liveDetection.plateNumberSuggestion) {
-      setWebcamPlateInput(liveDetection.plateNumberSuggestion);
+      if (!isPlateManuallyEdited) {
+        setWebcamPlateInput(liveDetection.plateNumberSuggestion);
+      }
     }
-  }, [liveDetection?.isOcrLiveRead, liveDetection?.plateNumberSuggestion]);
+  }, [liveDetection?.isOcrLiveRead, liveDetection?.plateNumberSuggestion, isPlateManuallyEdited]);
+
+  const handleUnlockPlate = () => {
+    aiVisionService.unlockPlate();
+    setWebcamPlateInput('');
+    setIsPlateManuallyEdited(false);
+  };
+
+  const handleUnlockVehicle = () => {
+    aiVisionService.unlockVehicle();
+  };
 
   const handleConfirmWebcamDetection = async () => {
     if (!liveDetection) return;
     setLoading(true);
     try {
-      const finalPlate = (liveDetection.isOcrLiveRead ? liveDetection.plateNumberSuggestion : webcamPlateInput) ||
-        webcamPlateInput ||
-        liveDetection.plateNumberSuggestion ||
-        liveDetection.fallbackPlate ||
-        'GB-4512-AZ';
+      const manualInputClean = webcamPlateInput.trim().toUpperCase();
+      const finalPlate = (isPlateManuallyEdited && manualInputClean
+        ? manualInputClean
+        : (manualInputClean || liveDetection.plateNumberSuggestion || liveDetection.fallbackPlate || 'GB-4512-AZ'));
 
-      const result = await api.detectVehicle(selectedLane, finalPlate.trim().toUpperCase(), liveDetection.categoryCode);
+      const result = await api.detectVehicle(selectedLane, finalPlate, liveDetection.categoryCode);
       if (liveDetection.snapshotDataUrl) {
         result.vehicleImageUrl = liveDetection.snapshotDataUrl;
       }
@@ -579,6 +592,22 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                       <span>VISION IA TEMPS RÉEL (EDGE)</span>
                     </div>
 
+                    {/* Frozen Vehicle Snapshot Indicator */}
+                    {liveDetection?.isVehicleLocked && (
+                      <div className="absolute top-3 right-3 bg-slate-900/95 backdrop-blur-md px-2.5 py-1 rounded-lg border border-emerald-500/60 text-[10px] font-mono text-emerald-300 flex items-center gap-1.5 shadow-lg">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                        <span>🔒 PHOTO VÉHICULE FIGÉE</span>
+                        <button
+                          type="button"
+                          onClick={handleUnlockVehicle}
+                          title="Reprendre une nouvelle photo du véhicule"
+                          className="ml-1 text-slate-400 hover:text-amber-300 underline text-[9px] cursor-pointer"
+                        >
+                          Reprendre
+                        </button>
+                      </div>
+                    )}
+
                     {/* Center Optical LAPI Reticle */}
                     <div className={`absolute inset-x-[15%] inset-y-[25%] border-2 rounded-xl pointer-events-none flex flex-col justify-between p-2.5 transition-all duration-300 ${
                       liveDetection?.isOcrLiveRead
@@ -592,10 +621,20 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                       }`}>
                         <span>[ CIBLE LAPI / ANPR ]</span>
                         {liveDetection?.isOcrLiveRead ? (
-                          <span className="text-emerald-400 font-extrabold flex items-center gap-1">
-                            <span>✅ PLAQUE LUE :</span>
-                            <span className="text-white px-1.5 rounded bg-emerald-500/30 border border-emerald-400/50">{liveDetection.plateNumberSuggestion}</span>
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-emerald-400 font-extrabold flex items-center gap-1">
+                              <span>{liveDetection.isPlateLocked ? '🔒 PLAQUE VERROUILLÉE :' : '✅ PLAQUE LUE :'}</span>
+                              <span className="text-white px-1.5 rounded bg-emerald-500/30 border border-emerald-400/50">{liveDetection.plateNumberSuggestion}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleUnlockPlate}
+                              title="Relire une plaque / Déverrouiller"
+                              className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[9px] border border-slate-600 pointer-events-auto cursor-pointer"
+                            >
+                              🔄 Relire
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-amber-300 animate-pulse text-[9px] flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
@@ -638,7 +677,10 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                 type="text"
                                 id="input-webcam-plate"
                                 value={webcamPlateInput}
-                                onChange={(e) => setWebcamPlateInput(e.target.value.toUpperCase())}
+                                onChange={(e) => {
+                                  setWebcamPlateInput(e.target.value.toUpperCase());
+                                  setIsPlateManuallyEdited(true);
+                                }}
                                 placeholder={liveDetection.plateNumberSuggestion || liveDetection.fallbackPlate || 'Ex: AB-093-FB'}
                                 className={`w-32 px-2 py-0.5 bg-slate-950 border font-mono font-bold text-xs rounded outline-none transition-colors ${
                                   liveDetection.isOcrLiveRead
@@ -646,9 +688,14 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                     : 'border-slate-700 text-white focus:border-amber-400'
                                 }`}
                               />
+                              {isPlateManuallyEdited && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 font-mono font-bold">
+                                  ✏️ Manuel
+                                </span>
+                              )}
                               {liveDetection.isOcrLiveRead ? (
                                 <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                                  <span>✨ LAPI</span>
+                                  <span>{liveDetection.isPlateLocked ? '🔒 LAPI' : '✨ LAPI'}</span>
                                   {liveDetection.ocrCountryLabel && (
                                     <span className="text-[9px] font-normal">{liveDetection.ocrCountryLabel}</span>
                                   )}
@@ -667,7 +714,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                           type="button"
                           id="btn-confirm-webcam-vehicle"
                           onClick={handleConfirmWebcamDetection}
-                          className="w-full sm:w-auto px-4 py-2 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all hover:scale-105 flex items-center justify-center gap-2 bg-emerald-400 hover:bg-emerald-300 shadow-emerald-500/30 font-black"
+                          className="w-full sm:w-auto px-4 py-2 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition-all hover:scale-105 flex items-center justify-center gap-2 bg-emerald-400 hover:bg-emerald-300 shadow-emerald-500/30 font-black cursor-pointer"
                         >
                           <Zap className="w-3.5 h-3.5" />
                           <span>

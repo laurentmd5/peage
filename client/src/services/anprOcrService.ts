@@ -186,7 +186,7 @@ class AnprOcrService {
       }
 
       const S = Math.round(targetW / 18);
-      const T = 0.10; // 10% lower than local neighborhood mean
+      const T = 0.12; // 12% lower than local neighborhood mean to cleanly isolate character strokes and sever separator dots
 
       const outCanvas = document.createElement('canvas');
       const margin = 16;

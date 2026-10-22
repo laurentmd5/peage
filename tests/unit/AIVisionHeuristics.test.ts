@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isYellowPixel, classifyTruckSilhouette } from '../../client/src/services/aiVisionService.ts';
+import { isYellowPixel, classifyTruckSilhouette, computePlateConsensus, aiVisionService } from '../../client/src/services/aiVisionService.ts';
 
 describe('AI Vision Edge Heuristics & Vehicle Classification Rules', () => {
   describe('Taxi Yellow Livery Colorimetry (isYellowPixel)', () => {
@@ -76,6 +76,79 @@ describe('AI Vision Edge Heuristics & Vehicle Classification Rules', () => {
       // Standard rigid distribution truck (aspect ratio 1.20, width 180px in 640px frame)
       const cat = classifyTruckSilhouette(1.20, 180, 640);
       expect(cat).toBe('CAT4');
+    });
+  });
+
+  describe('Temporal Rolling Consensus & Anti-Drift Buffer (computePlateConsensus)', () => {
+    it('should return null for empty readings buffer', () => {
+      expect(computePlateConsensus([])).toBeNull();
+    });
+
+    it('should pick candidate with majority votes across consecutive video frames', () => {
+      const readings = [
+        { plateNumber: 'AB-093-FB', confidence: 94 },
+        { plateNumber: 'AB-693-FB', confidence: 91 },
+        { plateNumber: 'AB-093-FB', confidence: 95 },
+        { plateNumber: 'AB-093-FB', confidence: 93 }
+      ];
+
+      const consensus = computePlateConsensus(readings);
+      expect(consensus).not.toBeNull();
+      expect(consensus?.plateNumber).toBe('AB-093-FB');
+      expect(consensus?.votes).toBe(3);
+    });
+
+    it('should protect against hand motion suffix degradation (FB -> FI)', () => {
+      // Operator hand motion right before clicking: stable reading AB-693-FB followed by occluded FI
+      const readings = [
+        { plateNumber: 'AB-693-FB', confidence: 94 },
+        { plateNumber: 'AB-693-FB', confidence: 94 },
+        { plateNumber: 'AB-693-FI', confidence: 84 }
+      ];
+
+      const consensus = computePlateConsensus(readings);
+      expect(consensus).not.toBeNull();
+      expect(consensus?.plateNumber).toBe('AB-693-FB');
+      expect(consensus?.votes).toBe(2);
+    });
+
+    it('should grant length bonus to complete 9-character plates over truncated readings', () => {
+      const readings = [
+        { plateNumber: 'AB-093-FB', confidence: 90 }, // complete 9-char
+        { plateNumber: 'AB-093', confidence: 91 }     // truncated 6-char
+      ];
+
+      const consensus = computePlateConsensus(readings);
+      expect(consensus).not.toBeNull();
+      expect(consensus?.plateNumber).toBe('AB-093-FB');
+    });
+
+    it('should allow aiVisionService to manage plate locks and reset state cleanly', () => {
+      aiVisionService.resetOcr();
+      expect(aiVisionService.isPlateReadingLocked()).toBe(false);
+      expect(aiVisionService.isVehicleSnapshotLocked()).toBe(false);
+      expect(aiVisionService.getLockedSnapshot()).toBeNull();
+
+      // Ingest high-confidence read -> latches automatically
+      aiVisionService.handleNewOcrResult({
+        plateNumber: 'AB-093-FB',
+        confidence: 94,
+        countryLabel: '🌐 Transit / Import'
+      });
+
+      expect(aiVisionService.isPlateReadingLocked()).toBe(true);
+      expect(aiVisionService.getEffectivePlate()?.plateNumber).toBe('AB-093-FB');
+
+      // Hand motion degradation reading (e.g. single frame AB-093-FI) does NOT degrade locked reading
+      aiVisionService.handleNewOcrResult({
+        plateNumber: 'AB-093-FI',
+        confidence: 86
+      });
+      expect(aiVisionService.getEffectivePlate()?.plateNumber).toBe('AB-093-FB');
+
+      // Unlocking plate clears lock
+      aiVisionService.unlockPlate();
+      expect(aiVisionService.isPlateReadingLocked()).toBe(false);
     });
   });
 });

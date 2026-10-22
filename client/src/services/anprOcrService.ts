@@ -1,0 +1,301 @@
+/**
+ * ANPR / LAPI OCR Service for License Plate Recognition
+ * Powered by Tesseract.js (WebAssembly / Web Worker)
+ * Includes Region of Interest (ROI) extraction, binarization, and Guinea-Bissau / ECOWAS syntax normalization
+ */
+
+import { createWorker, Worker } from 'tesseract.js';
+
+export interface PlateOcrResult {
+  plateNumber: string;
+  confidence: number;
+  rawText: string;
+  country: 'GW' | 'SN' | 'UNKNOWN';
+  countryLabel: string;
+  processedImageCrop?: string;
+}
+
+class AnprOcrService {
+  private worker: Worker | null = null;
+  private isInitializing = false;
+  private initPromise: Promise<boolean> | null = null;
+
+  /**
+   * Initialize Tesseract Worker with Latin alphanumeric character whitelist
+   */
+  async init(): Promise<boolean> {
+    if (this.worker) return true;
+    if (this.initPromise) return this.initPromise;
+
+    this.isInitializing = true;
+    this.initPromise = (async () => {
+      try {
+        const worker = await createWorker('eng');
+        await worker.setParameters({
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789- ',
+          tessedit_pageseg_mode: '7' as any // Treat image as a single text line (ideal for license plates)
+        });
+        this.worker = worker;
+        this.isInitializing = false;
+        console.log('[ANPR OCR] Tesseract Worker successfully initialized');
+        return true;
+      } catch (err) {
+        console.warn('[ANPR OCR] Failed to initialize Tesseract Worker:', err);
+        this.isInitializing = false;
+        return false;
+      }
+    })();
+
+    return this.initPromise;
+  }
+
+  /**
+   * Preprocess candidate license plate region (Grayscale + Adaptive Contrast Binarization)
+   */
+  preprocessPlateImage(
+    sourceCanvas: HTMLCanvasElement,
+    cropX: number,
+    cropY: number,
+    cropW: number,
+    cropH: number
+  ): HTMLCanvasElement {
+    const targetCanvas = document.createElement('canvas');
+    targetCanvas.width = Math.max(120, cropW * 2); // Upscale for better OCR accuracy
+    targetCanvas.height = Math.max(40, cropH * 2);
+    const ctx = targetCanvas.getContext('2d');
+    if (!ctx) return targetCanvas;
+
+    // Enable high quality image smoothing
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    // Draw upscaled crop
+    ctx.drawImage(
+      sourceCanvas,
+      cropX, cropY, cropW, cropH,
+      0, 0, targetCanvas.width, targetCanvas.height
+    );
+
+    const imgData = ctx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
+    const data = imgData.data;
+
+    // 1. Calculate average luminance for Otsu thresholding
+    let totalLum = 0;
+    const pixelCount = data.length / 4;
+    for (let i = 0; i < data.length; i += 4) {
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      totalLum += lum;
+    }
+    const avgLum = totalLum / pixelCount;
+    // Binarize: darker than threshold -> black (character), brighter -> white (plate background)
+    const threshold = Math.max(70, Math.min(180, avgLum * 0.95));
+
+    for (let i = 0; i < data.length; i += 4) {
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      const val = lum < threshold ? 0 : 255;
+      data[i] = val;
+      data[i + 1] = val;
+      data[i + 2] = val;
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    return targetCanvas;
+  }
+
+  /**
+   * Recognize license plate text from a video element or canvas within a bounding box
+   */
+  async recognizePlate(
+    source: HTMLVideoElement | HTMLCanvasElement,
+    bbox?: [number, number, number, number]
+  ): Promise<PlateOcrResult | null> {
+    try {
+      const ready = await this.init();
+      if (!ready || !this.worker) return null;
+
+      // Create snapshot canvas
+      const srcCanvas = document.createElement('canvas');
+      const width = source instanceof HTMLVideoElement ? source.videoWidth : source.width;
+      const height = source instanceof HTMLVideoElement ? source.videoHeight : source.height;
+
+      if (!width || !height) return null;
+      srcCanvas.width = width;
+      srcCanvas.height = height;
+
+      const sCtx = srcCanvas.getContext('2d');
+      if (!sCtx) return null;
+      sCtx.drawImage(source, 0, 0);
+
+      // Determine Plate Region of Interest (ROI)
+      let cropX: number, cropY: number, cropW: number, cropH: number;
+
+      if (bbox) {
+        const [vx, vy, vw, vh] = bbox;
+        // The license plate is typically in the lower 35% and horizontally centered
+        cropX = Math.max(0, Math.round(vx + vw * 0.15));
+        cropY = Math.max(0, Math.round(vy + vh * 0.60));
+        cropW = Math.min(width - cropX, Math.round(vw * 0.70));
+        cropH = Math.min(height - cropY, Math.round(vh * 0.35));
+      } else {
+        // Fallback: central area
+        cropX = Math.round(width * 0.2);
+        cropY = Math.round(height * 0.35);
+        cropW = Math.round(width * 0.6);
+        cropH = Math.round(height * 0.3);
+      }
+
+      if (cropW < 20 || cropH < 10) return null;
+
+      // Preprocess crop
+      const processedCanvas = this.preprocessPlateImage(srcCanvas, cropX, cropY, cropW, cropH);
+      const cropDataUrl = processedCanvas.toDataURL('image/jpeg', 0.85);
+
+      // Perform OCR
+      const result = await this.worker.recognize(processedCanvas);
+      const rawText = result.data.text ? result.data.text.trim() : '';
+
+      if (!rawText) return null;
+
+      // Apply Guinea-Bissau & Senegal syntactic grammar correction
+      const normalized = normalizePlateText(rawText);
+      if (!normalized) return null;
+
+      return {
+        ...normalized,
+        rawText,
+        processedImageCrop: cropDataUrl
+      };
+    } catch (err) {
+      console.warn('[ANPR OCR] OCR extraction error:', err);
+      return null;
+    }
+  }
+
+  async terminate(): Promise<void> {
+    if (this.worker) {
+      await this.worker.terminate();
+      this.worker = null;
+    }
+  }
+}
+
+/**
+ * Normalizes and grammatically corrects OCR text to Guinea-Bissau (GB) or Senegal (DK) formats
+ * Resolves standard OCR glyph confusions (e.g. 8 <-> B, 0 <-> O, 1 <-> I)
+ */
+export function normalizePlateText(raw: string): {
+  plateNumber: string;
+  confidence: number;
+  country: 'GW' | 'SN' | 'UNKNOWN';
+  countryLabel: string;
+} | null {
+  if (!raw) return null;
+
+  // Clean all noise except alphanumeric
+  const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (clean.length < 4) return null;
+
+  // 1. Guinea-Bissau Match: GB + 3-4 digits + 1-2 letters
+  // Handle frequent OCR confusions for "GB": G8, 6B, 68, CB, QB
+  let gbCandidate = clean;
+  if (/^(GB|G8|6B|68|CB|QB)/.test(gbCandidate)) {
+    gbCandidate = 'GB' + gbCandidate.substring(2);
+  }
+
+  const gbPattern = /^GB([0-9OIZSBL]{3,4})([A-Z0-9]{1,2})$/;
+  const gbMatch = gbCandidate.match(gbPattern);
+  if (gbMatch) {
+    const rawDigits = gbMatch[1];
+    const rawLetters = gbMatch[2];
+
+    // Force digits in the middle
+    const correctedDigits = rawDigits
+      .replace(/O/g, '0')
+      .replace(/I|L/g, '1')
+      .replace(/Z/g, '2')
+      .replace(/S/g, '5')
+      .replace(/B/g, '8');
+
+    // Force letters in the suffix
+    const correctedLetters = rawLetters
+      .replace(/0/g, 'O')
+      .replace(/1/g, 'I')
+      .replace(/2/g, 'Z')
+      .replace(/5/g, 'S')
+      .replace(/8/g, 'B');
+
+    return {
+      plateNumber: `GB-${correctedDigits}-${correctedLetters}`,
+      confidence: 94,
+      country: 'GW',
+      countryLabel: '🇬🇼 Guinée-Bissau'
+    };
+  }
+
+  // 2. Senegal Match: DK + 3-4 digits + 1-2 letters
+  // Handle confusions for "DK": 0K, OK, Dk
+  let dkCandidate = clean;
+  if (/^(DK|0K|OK)/.test(dkCandidate)) {
+    dkCandidate = 'DK' + dkCandidate.substring(2);
+  }
+
+  const dkPattern = /^DK([0-9OIZSBL]{3,4})([A-Z0-9]{1,2})$/;
+  const dkMatch = dkCandidate.match(dkPattern);
+  if (dkMatch) {
+    const rawDigits = dkMatch[1];
+    const rawLetters = dkMatch[2];
+
+    const correctedDigits = rawDigits
+      .replace(/O/g, '0')
+      .replace(/I|L/g, '1')
+      .replace(/Z/g, '2')
+      .replace(/S/g, '5')
+      .replace(/B/g, '8');
+
+    const correctedLetters = rawLetters
+      .replace(/0/g, 'O')
+      .replace(/1/g, 'I')
+      .replace(/2/g, 'Z')
+      .replace(/5/g, 'S')
+      .replace(/8/g, 'B');
+
+    return {
+      plateNumber: `DK-${correctedDigits}-${correctedLetters}`,
+      confidence: 92,
+      country: 'SN',
+      countryLabel: '🇸🇳 Sénégal'
+    };
+  }
+
+  // 3. Unprefixed plate format: 3-4 digits + 1-2 letters (Defaults to Guinea-Bissau for AREZKI BISSAU plaza)
+  const genericMatch = clean.match(/^([0-9OIZSBL]{3,4})([A-Z0-9]{1,2})$/);
+  if (genericMatch) {
+    const rawDigits = genericMatch[1];
+    const rawLetters = genericMatch[2];
+
+    const correctedDigits = rawDigits
+      .replace(/O/g, '0')
+      .replace(/I|L/g, '1')
+      .replace(/Z/g, '2')
+      .replace(/S/g, '5')
+      .replace(/B/g, '8');
+
+    const correctedLetters = rawLetters
+      .replace(/0/g, 'O')
+      .replace(/1/g, 'I')
+      .replace(/2/g, 'Z')
+      .replace(/5/g, 'S')
+      .replace(/8/g, 'B');
+
+    return {
+      plateNumber: `GB-${correctedDigits}-${correctedLetters}`,
+      confidence: 88,
+      country: 'GW',
+      countryLabel: '🇬🇼 Guinée-Bissau'
+    };
+  }
+
+  return null;
+}
+
+export const anprOcrService = new AnprOcrService();

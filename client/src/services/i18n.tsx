@@ -112,6 +112,8 @@ export const translations = {
   waitingWebcamVehicle: { fr: 'Pointez la caméra vers un véhicule ou une photo...', en: 'Point camera at a vehicle or photo...' },
   validateWebcamVehicle: { fr: '⚡ Valider le Véhicule Détecté', en: '⚡ Confirm Detected Vehicle' },
   cameraLoadingModel: { fr: 'Chargement du modèle de vision IA (Edge MobileNet)...', en: 'Loading Edge AI Vision Model (MobileNet)...' },
+  liveOcrBadge: { fr: '✨ LAPI OCR En Direct', en: '✨ Live ANPR OCR' },
+  plateLabel: { fr: 'Plaque', en: 'Plate' },
 
   // Lane Simulation & Proforma Equipment
   laneSimulationTitle: { fr: 'Simulation Voie & Barrière Physique', en: 'Lane & Physical Barrier Simulation' },

@@ -286,7 +286,8 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       }
       setIsWebcamActive(true);
 
-      // Preload AI Model
+      // Preload AI Model & Reset OCR
+      aiVisionService.resetOcr();
       await aiVisionService.loadModel();
       setIsModelLoading(false);
 
@@ -314,6 +315,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
+    aiVisionService.resetOcr();
     setIsWebcamActive(false);
     setLiveDetection(null);
   };
@@ -575,8 +577,18 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                 {liveDetection.confidence}%
                               </span>
                             </div>
-                            <div className="text-[11px] text-emerald-400 font-mono font-bold">
-                              Tarif : {formatCurrency(liveDetection.tariff)} FCFA
+                            <div className="text-[11px] text-emerald-400 font-mono font-bold flex items-center gap-2 mt-0.5">
+                              <span>Tarif : {formatCurrency(liveDetection.tariff)} FCFA</span>
+                              {liveDetection.plateNumberSuggestion && (
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold flex items-center gap-1 ${
+                                  liveDetection.isOcrLiveRead
+                                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
+                                    : 'bg-slate-800 text-slate-300 border border-slate-700'
+                                }`}>
+                                  <span>{liveDetection.isOcrLiveRead ? '✨ LAPI :' : 'Plaque :'}</span>
+                                  <span className="text-white">{liveDetection.plateNumberSuggestion}</span>
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>

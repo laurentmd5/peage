@@ -3,6 +3,8 @@
  * Compatible with standard PC Webcams, USB inspection cameras & RTSP IP streams
  */
 
+import { anprOcrService } from './anprOcrService.ts';
+
 export interface VehicleDetectionResult {
   categoryCode: 'CAT1' | 'CAT2' | 'CAT3' | 'CAT4' | 'CAT5';
   categoryLabel: string;
@@ -12,6 +14,9 @@ export interface VehicleDetectionResult {
   bbox: [number, number, number, number]; // [x, y, width, height]
   snapshotDataUrl?: string;
   plateNumberSuggestion?: string;
+  isOcrLiveRead?: boolean;
+  plateCropUrl?: string;
+  ocrCountryLabel?: string;
 }
 
 /**
@@ -47,6 +52,23 @@ class AIVisionService {
   private model: any = null;
   private isModelLoading = false;
   private modelLoadError: string | null = null;
+
+  // Real-time Edge ANPR / LAPI OCR state
+  private isOcrBusy = false;
+  private lastOcrPlate: string | null = null;
+  private lastOcrCrop: string | null = null;
+  private lastOcrCountryLabel: string | null = null;
+  private lastOcrTimestamp = 0;
+
+  /**
+   * Resets the ANPR OCR cache when starting a new vehicle passage
+   */
+  resetOcr(): void {
+    this.lastOcrPlate = null;
+    this.lastOcrCrop = null;
+    this.lastOcrCountryLabel = null;
+    this.isOcrBusy = false;
+  }
 
   /**
    * Dynamically loads TensorFlow.js and COCO-SSD from trusted CDN
@@ -132,6 +154,26 @@ class AIVisionService {
       vehiclePreds.sort((a: any, b: any) => b.score - a.score);
       const best = vehiclePreds[0];
 
+      // Asynchronously trigger background ANPR OCR recognition if cooldown has elapsed
+      const now = Date.now();
+      if (!this.isOcrBusy && (now - this.lastOcrTimestamp > 1200)) {
+        this.isOcrBusy = true;
+        anprOcrService.recognizePlate(videoEl, best.bbox)
+          .then(ocrResult => {
+            if (ocrResult && ocrResult.plateNumber) {
+              this.lastOcrPlate = ocrResult.plateNumber;
+              this.lastOcrCrop = ocrResult.processedImageCrop || null;
+              this.lastOcrCountryLabel = ocrResult.countryLabel || null;
+            }
+            this.isOcrBusy = false;
+            this.lastOcrTimestamp = Date.now();
+          })
+          .catch(() => {
+            this.isOcrBusy = false;
+            this.lastOcrTimestamp = Date.now();
+          });
+      }
+
       return this.mapObjectToCategory(best.class, best.score, best.bbox, videoEl);
     } catch (err) {
       console.error('Inference error:', err);
@@ -151,6 +193,8 @@ class AIVisionService {
     const [x, y, w, h] = bbox;
     const confidencePct = Math.round(score * 100);
     const aspectRatio = w / Math.max(h, 1);
+    const isOcrLive = !!this.lastOcrPlate;
+    const resolvePlate = (fallback: string) => this.lastOcrPlate || fallback;
 
     // Capture snapshot frame
     const canvas = document.createElement('canvas');
@@ -172,7 +216,10 @@ class AIVisionService {
         detectedObject: objectClass,
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: 'GB-1020-MC'
+        plateNumberSuggestion: resolvePlate('GB-1020-MC'),
+        isOcrLiveRead: isOcrLive,
+        plateCropUrl: this.lastOcrCrop || undefined,
+        ocrCountryLabel: this.lastOcrCountryLabel || undefined
       };
     }
 
@@ -186,7 +233,10 @@ class AIVisionService {
         detectedObject: 'bus',
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: 'GB-6789-DX'
+        plateNumberSuggestion: resolvePlate('GB-6789-DX'),
+        isOcrLiveRead: isOcrLive,
+        plateCropUrl: this.lastOcrCrop || undefined,
+        ocrCountryLabel: this.lastOcrCountryLabel || undefined
       };
     }
 
@@ -203,7 +253,10 @@ class AIVisionService {
           detectedObject: 'semi-trailer',
           bbox,
           snapshotDataUrl,
-          plateNumberSuggestion: 'GB-9900-HB'
+          plateNumberSuggestion: resolvePlate('GB-9900-HB'),
+          isOcrLiveRead: isOcrLive,
+          plateCropUrl: this.lastOcrCrop || undefined,
+          ocrCountryLabel: this.lastOcrCountryLabel || undefined
         };
       }
       return {
@@ -214,7 +267,10 @@ class AIVisionService {
         detectedObject: 'truck',
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: 'GB-8765-BZ'
+        plateNumberSuggestion: resolvePlate('GB-8765-BZ'),
+        isOcrLiveRead: isOcrLive,
+        plateCropUrl: this.lastOcrCrop || undefined,
+        ocrCountryLabel: this.lastOcrCountryLabel || undefined
       };
     }
 
@@ -230,7 +286,10 @@ class AIVisionService {
         detectedObject: 'taxi',
         bbox,
         snapshotDataUrl,
-        plateNumberSuggestion: 'GB-2345-AF'
+        plateNumberSuggestion: resolvePlate('GB-2345-AF'),
+        isOcrLiveRead: isOcrLive,
+        plateCropUrl: this.lastOcrCrop || undefined,
+        ocrCountryLabel: this.lastOcrCountryLabel || undefined
       };
     }
 
@@ -242,7 +301,10 @@ class AIVisionService {
       detectedObject: 'car',
       bbox,
       snapshotDataUrl,
-      plateNumberSuggestion: 'GB-4512-AZ'
+      plateNumberSuggestion: resolvePlate('GB-4512-AZ'),
+      isOcrLiveRead: isOcrLive,
+      plateCropUrl: this.lastOcrCrop || undefined,
+      ocrCountryLabel: this.lastOcrCountryLabel || undefined
     };
   }
 

@@ -29,7 +29,9 @@ import {
   Camera,
   Video,
   Zap,
-  Check
+  Check,
+  Settings,
+  Copy
 } from 'lucide-react';
 
 interface PosteDeCaisseProps {
@@ -67,10 +69,18 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<any>(null);
 
-  // Real Hardware: Hikvision Smart IPC (DS-2CD4626FWD-IZHS/P) states
-  const [hikvisionCameraIp, setHikvisionCameraIp] = useState<string>('192.168.1.64');
-  const [isTestingHikvision, setIsTestingHikvision] = useState(false);
-  const [hikvisionStatusMsg, setHikvisionStatusMsg] = useState<string | null>(null);
+  // Real Hardware: Industrial ANPR Camera states (Dynamic IP & Network, no hardcoded values)
+  const [cameraIp, setCameraIp] = useState<string>(() => localStorage.getItem('toll_camera_ip') || '');
+  const [cameraStatusMsg, setCameraStatusMsg] = useState<string | null>(null);
+  const [networkInfo, setNetworkInfo] = useState<{
+    serverIps?: string[];
+    primaryServerIp?: string;
+    serverPort?: number;
+    webhookUrls?: string[];
+    activeCameraIp?: string | null;
+  } | null>(null);
+  const [showNetworkSettings, setShowNetworkSettings] = useState<boolean>(false);
+  const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
 
   // Real Hardware: Printing states
   const [autoPrintEnabled, setAutoPrintEnabled] = useState(true);
@@ -368,7 +378,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
             setDetection(detected);
             setAmountPaid(detected.amountDue);
             setStep('DETECTED');
-            setHikvisionStatusMsg(`✅ Détection caméra reçue : ${detected.plateNumber} [${detected.categoryCode}]`);
+            setCameraStatusMsg(`✅ Détection caméra reçue : ${detected.plateNumber} [${detected.categoryCode}]`);
           }
         } catch (_) {}
       };
@@ -392,9 +402,28 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     };
   }, [cameraMode, step]);
 
+  // Fetch dynamic camera and network status on mount
+  useEffect(() => {
+    api.getCameraStatus().then(status => {
+      if (status) {
+        setNetworkInfo({
+          serverIps: status.serverIps,
+          primaryServerIp: status.primaryServerIp,
+          serverPort: status.serverPort,
+          webhookUrls: status.webhookUrls,
+          activeCameraIp: status.activeCameraIp
+        });
+        if (!cameraIp && status.activeCameraIp) {
+          setCameraIp(status.activeCameraIp);
+          localStorage.setItem('toll_camera_ip', status.activeCameraIp);
+        }
+      }
+    }).catch(() => {});
+  }, [cameraIp]);
+
   const handleTestHikvisionWebhook = async () => {
     setIsTestingHikvision(true);
-    setHikvisionStatusMsg(null);
+    setCameraStatusMsg(null);
     try {
       const res = await api.simulateHikvisionWebhook({
         laneId: selectedLane,
@@ -405,9 +434,9 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       setDetection(res.detection);
       setAmountPaid(res.detection.amountDue);
       setStep('DETECTED');
-      setHikvisionStatusMsg('✅ Détection simulée reçue avec succès depuis la caméra Hikvision !');
+      setCameraStatusMsg('✅ Détection simulée reçue avec succès depuis la caméra ANPR !');
     } catch (err: any) {
-      setError(`Erreur simulation Hikvision: ${err.message}`);
+      setError(`Erreur simulation caméra: ${err.message}`);
     } finally {
       setIsTestingHikvision(false);
     }
@@ -856,32 +885,140 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                        <span className="text-[10px] font-mono font-bold text-emerald-400">
-                          SURVEILLANCE ACTIVE
-                        </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowNetworkSettings(prev => !prev)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-mono transition-colors border ${
+                            showNetworkSettings
+                              ? 'bg-blue-500/20 text-blue-300 border-blue-500/50'
+                              : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-600'
+                          }`}
+                          title="Paramètres de liaison et URL Webhook"
+                        >
+                          <Settings className="w-3 h-3 text-blue-400" />
+                          <span>Liaison Réseau</span>
+                        </button>
+
+                        <div className="flex items-center gap-2 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                          <span className="text-[10px] font-mono font-bold text-emerald-400">
+                            SURVEILLANCE ACTIVE
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    {hikvisionStatusMsg && (
+                    {/* Expandable Dynamic Network & Webhook Configuration */}
+                    {showNetworkSettings && (
+                      <div className="bg-slate-900/95 border border-blue-500/30 rounded-xl p-3.5 space-y-3 text-xs">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                          <div className="font-bold text-white flex items-center gap-2">
+                            <Settings className="w-4 h-4 text-blue-400" />
+                            <span>Configuration Réseau Dynamique</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-emerald-400">
+                            IP Serveur : {networkInfo?.primaryServerIp || window.location.hostname}
+                          </span>
+                        </div>
+
+                        {/* URL Webhook à renseigner dans la caméra */}
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-slate-300">
+                            URL Webhook (à saisir dans le menu HTTP / Alarm Server de votre caméra) :
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              readOnly
+                              value={
+                                networkInfo?.webhookUrls?.[0] ||
+                                `http://${window.location.hostname || '127.0.0.1'}:3001/api/toll/camera-webhook`
+                              }
+                              className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-xs text-blue-300 select-all"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const url =
+                                  networkInfo?.webhookUrls?.[0] ||
+                                  `http://${window.location.hostname || '127.0.0.1'}:3001/api/toll/camera-webhook`;
+                                navigator.clipboard.writeText(url);
+                                setCopiedUrl(true);
+                                setTimeout(() => setCopiedUrl(false), 2000);
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center gap-1.5"
+                            >
+                              {copiedUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                              <span>{copiedUrl ? 'Copié !' : 'Copier'}</span>
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-slate-400">
+                            💡 Cette URL s'adapte automatiquement à l'adresse IP réelle de la machine sans aucun code en dur.
+                          </p>
+                        </div>
+
+                        {/* IP Caméra pour le flux visuel */}
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-semibold text-slate-300">
+                              Adresse IP de la Caméra (Optionnel, pour le retour vidéo) :
+                            </label>
+                            {networkInfo?.activeCameraIp && (
+                              <span className="text-[10px] font-mono text-emerald-400">
+                                Détectée automatiquement : {networkInfo.activeCameraIp}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={cameraIp}
+                              onChange={(e) => {
+                                const val = e.target.value.trim();
+                                setCameraIp(val);
+                                localStorage.setItem('toll_camera_ip', val);
+                              }}
+                              placeholder="Ex: 192.168.1.64 ou 10.0.0.50"
+                              className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-xs text-white placeholder-slate-500"
+                            />
+                            {networkInfo?.activeCameraIp && cameraIp !== networkInfo.activeCameraIp && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCameraIp(networkInfo.activeCameraIp!);
+                                  localStorage.setItem('toll_camera_ip', networkInfo.activeCameraIp!);
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs"
+                              >
+                                Utiliser l'IP détectée
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {cameraStatusMsg && (
                       <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-2.5 text-emerald-300 text-xs flex items-center gap-2">
                         <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>{hikvisionStatusMsg}</span>
+                        <span>{cameraStatusMsg}</span>
                       </div>
                     )}
 
                     {/* Camera Live Preview & Optical Targeting */}
                     <div className="relative rounded-xl overflow-hidden border border-blue-500/40 bg-black aspect-video flex items-center justify-center shadow-inner group">
                       {/* Background Optical Frame or Image */}
-                      <img
-                        src={`http://${hikvisionCameraIp}/ISAPI/Streaming/channels/101/picture?t=${Date.now()}`}
-                        alt="Camera Live Feed"
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
-                        className="w-full h-full object-cover"
-                      />
+                      {cameraIp ? (
+                        <img
+                          src={`http://${cameraIp}/ISAPI/Streaming/channels/101/picture?t=${Date.now()}`}
+                          alt="Camera Live Feed"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : null}
 
                       {/* Optical HUD Overlay */}
                       <div className="absolute inset-0 flex flex-col justify-between p-3 pointer-events-none bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/60">

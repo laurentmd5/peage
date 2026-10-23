@@ -7,9 +7,11 @@ import { ITransactionRepository } from '../../domain/repositories/ITransactionRe
 import { AuthenticatedRequest, authMiddleware } from '../middlewares/AuthMiddleware.ts';
 import { EventBroadcaster } from '../../infrastructure/realtime/EventBroadcaster.ts';
 import { parseHikvisionPayload } from '../../infrastructure/hikvision/HikvisionWebhookParser.ts';
+import { NetworkService } from '../../infrastructure/network/NetworkService.ts';
 
-// In-memory cache for latest Hikvision LPR detections per lane
+// In-memory cache for latest ANPR detections per lane
 export const latestHikvisionDetections = new Map<string, any>();
+export let lastSeenCameraIp: string | null = null;
 
 export function createTollRouter(
   detectUseCase: DetectVehicleUseCase,
@@ -151,7 +153,16 @@ export function createTollRouter(
         return;
       }
 
-      console.log(`[CAMERA LAPI] 🎥 Détection reçue pour ${parsed.laneId}: Plaque ${parsed.plateNumber} (${parsed.vehicleType} -> ${parsed.categoryCode}, conf: ${parsed.confidence}%)`);
+      // Détection automatique et dynamique de l'IP réelle de la caméra émettrice
+      const remote = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || req.ip || '';
+      const cleanIp = remote.replace(/^.*:/, '');
+      if (cleanIp && cleanIp !== '1' && cleanIp !== '127.0.0.1') {
+        lastSeenCameraIp = cleanIp;
+      } else if (parsed.cameraIp) {
+        lastSeenCameraIp = parsed.cameraIp;
+      }
+
+      console.log(`[CAMERA LAPI] 🎥 Détection reçue pour ${parsed.laneId}: Plaque ${parsed.plateNumber} (${parsed.vehicleType} -> ${parsed.categoryCode}, conf: ${parsed.confidence}%, IP caméra: ${lastSeenCameraIp || 'auto'})`);
 
       const result = await detectUseCase.execute(parsed.laneId, parsed.plateNumber, parsed.categoryCode);
       if (parsed.vehicleImageUrl) {
@@ -230,18 +241,30 @@ export function createTollRouter(
     res.json({ laneId, detection });
   });
 
-  // 10. Statut de la passerelle Caméra LAPI (Multi-Marques)
+  // 10. Statut dynamique de la passerelle Caméra LAPI & Réseau (Multi-Marques)
   router.get(['/camera-status', '/anpr-status', '/hikvision-status'], async (_req, res) => {
+    const serverPort = Number(process.env.PORT) || 3001;
+    const network = NetworkService.getNetworkInfo(serverPort);
     res.json({
       status: 'LISTENING',
       supportedVendors: ['Hikvision (ISAPI)', 'Dahua (ANPR/ITC)', 'Axis (VAPIX/LPR)', 'Uniview', 'Standard HTTP/JSON ANPR'],
-      supportedModel: 'DS-2CD4626FWD-IZHS/P (Hikvision) & Multi-Marques',
-      defaultCameraIp: '192.168.1.64',
+      supportedModel: 'DS-2CD4626FWD-IZHS/P (Hikvision), Dahua, Axis & Multi-Marques',
+      serverIps: network.serverIps,
+      primaryServerIp: network.primaryIp,
+      serverPort: network.port,
+      webhookUrls: network.webhookUrls,
       webhookEndpoint: '/api/toll/camera-webhook',
       hikvisionEndpoint: '/api/toll/hikvision-webhook',
+      activeCameraIp: lastSeenCameraIp,
       activeDetectionsCount: latestHikvisionDetections.size,
       time: new Date().toISOString()
     });
+  });
+
+  // 11. Informations Réseau Dynamiques (pour configuration caméra sans IP en dur)
+  router.get('/network-info', async (_req, res) => {
+    const serverPort = Number(process.env.PORT) || 3001;
+    res.json(NetworkService.getNetworkInfo(serverPort));
   });
 
   return router;

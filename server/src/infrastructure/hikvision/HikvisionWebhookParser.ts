@@ -104,7 +104,7 @@ export function parseHikvisionPayload(body: any): ParsedHikvisionDetection | nul
   let conf = 95;
   let vType = 'car';
   let lane = 'VOIE-01';
-  let ip = '192.168.1.64';
+  let ip = '';
   let dateTime = new Date().toISOString();
   let vehicleImg: string | undefined;
   let plateImg: string | undefined;
@@ -180,7 +180,7 @@ export function parseHikvisionPayload(body: any): ParsedHikvisionDetection | nul
       body.carType ||
       'car';
 
-    ip = body.ipAddress || pr.ipAddress || body.ip || '192.168.1.64';
+    ip = body.ipAddress || pr.ipAddress || body.ip || '';
     dateTime = body.dateTime || pr.dateTime || body.time || new Date().toISOString();
 
     const rawLane = pr.laneNum || pr.channelID || body.channelID || body.laneId || body.lane || 1;

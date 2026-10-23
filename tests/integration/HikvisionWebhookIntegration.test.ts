@@ -173,6 +173,15 @@ describe('Hikvision Smart IPC LPR & Webhook Integration Tests', () => {
         expect(universalStatusRes.status).toBe(200);
         const universalStatusData = await universalStatusRes.json();
         expect(universalStatusData.supportedVendors).toContain('Dahua (ANPR/ITC)');
+        expect(universalStatusData.serverIps).toBeDefined();
+        expect(Array.isArray(universalStatusData.serverIps)).toBe(true);
+
+        // Check dynamic network-info endpoint (no hardcoded IP)
+        const netRes = await fetch(`http://localhost:${port}/api/toll/network-info`);
+        expect(netRes.status).toBe(200);
+        const netData = await netRes.json();
+        expect(netData.serverIps.length).toBeGreaterThan(0);
+        expect(netData.webhookUrls[0]).toContain('/api/toll/camera-webhook');
       } finally {
         server.close();
       }

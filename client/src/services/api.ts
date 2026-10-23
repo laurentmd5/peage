@@ -154,10 +154,22 @@ export const api = {
       status: string;
       supportedVendors?: string[];
       supportedModel?: string;
-      defaultCameraIp: string;
+      serverIps?: string[];
+      primaryServerIp?: string;
+      serverPort?: number;
+      webhookUrls?: string[];
       webhookEndpoint: string;
+      activeCameraIp?: string | null;
       activeDetectionsCount: number;
     }>('/toll/camera-status'),
+
+  getNetworkInfo: () =>
+    request<{
+      serverIps: string[];
+      primaryIp: string;
+      port: number;
+      webhookUrls: string[];
+    }>('/toll/network-info'),
 
   getLatestCameraDetection: (laneId: string = 'VOIE-01') =>
     request<{ laneId: string; detection: VehicleDetection | null }>(`/toll/camera-latest?laneId=${encodeURIComponent(laneId)}`),

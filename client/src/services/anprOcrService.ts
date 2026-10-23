@@ -128,7 +128,9 @@ class AnprOcrService {
           const padX = Math.round((maxX - minX) * 0.05);
           const px = Math.max(0, minX - padX);
           const pw = Math.min(rw - px, (maxX - minX) + padX * 2);
-          return { x: rx + px, y: ry + py, w: pw, h: ph };
+          if (pw >= 50 && ph >= 16) {
+            return { x: rx + px, y: ry + py, w: pw, h: ph };
+          }
         }
       }
     } catch {
@@ -313,8 +315,28 @@ class AnprOcrService {
 
       // Handle standalone HTMLCanvasElement directly
       if (source instanceof HTMLCanvasElement) {
-        // Pass 1: Otsu binarization
-        const canvasOtsu = this.preprocessPlateImage(srcCanvas, 0, 0, width, height, 'otsu');
+        const cropX = bbox ? Math.max(0, bbox[0]) : 0;
+        const cropY = bbox ? Math.max(0, bbox[1]) : 0;
+        const cropW = bbox ? Math.min(width - cropX, bbox[2]) : width;
+        const cropH = bbox ? Math.min(height - cropY, bbox[3]) : height;
+
+        const plateCrop = this.findPlateSubcrop(srcCanvas, cropX, cropY, cropW, cropH);
+
+        // Pass 1: Adaptive binarization
+        const canvasAdapt = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'adaptive');
+        const resAdapt = await this.worker.recognize(canvasAdapt);
+        const rawAdapt = resAdapt.data.text ? resAdapt.data.text.trim() : '';
+        const normAdapt = rawAdapt ? normalizePlateText(rawAdapt) : null;
+        if (normAdapt) {
+          return {
+            ...normAdapt,
+            rawText: rawAdapt,
+            processedImageCrop: canvasAdapt.toDataURL('image/jpeg', 0.85)
+          };
+        }
+
+        // Pass 2: Otsu binarization
+        const canvasOtsu = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'otsu');
         const resOtsu = await this.worker.recognize(canvasOtsu);
         const rawOtsu = resOtsu.data.text ? resOtsu.data.text.trim() : '';
         const normOtsu = rawOtsu ? normalizePlateText(rawOtsu) : null;
@@ -326,17 +348,26 @@ class AnprOcrService {
           };
         }
 
-        // Pass 2: Adaptive binarization
-        const canvasAdapt = this.preprocessPlateImage(srcCanvas, 0, 0, width, height, 'adaptive');
-        const resAdapt = await this.worker.recognize(canvasAdapt);
-        const rawAdapt = resAdapt.data.text ? resAdapt.data.text.trim() : '';
-        const normAdapt = rawAdapt ? normalizePlateText(rawAdapt) : null;
-        if (normAdapt) {
-          return {
-            ...normAdapt,
-            rawText: rawAdapt,
-            processedImageCrop: canvasAdapt.toDataURL('image/jpeg', 0.85)
-          };
+        // Pass 3: Direct scaled crop
+        const scale = 2.0;
+        const directCanvas = document.createElement('canvas');
+        directCanvas.width = Math.round(plateCrop.w * scale);
+        directCanvas.height = Math.round(plateCrop.h * scale);
+        const dCtx = directCanvas.getContext('2d');
+        if (dCtx) {
+          dCtx.imageSmoothingEnabled = true;
+          dCtx.imageSmoothingQuality = 'high';
+          dCtx.drawImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 0, 0, directCanvas.width, directCanvas.height);
+          const resDirect = await this.worker.recognize(directCanvas);
+          const rawDirect = resDirect.data.text ? resDirect.data.text.trim() : '';
+          const normDirect = rawDirect ? normalizePlateText(rawDirect) : null;
+          if (normDirect) {
+            return {
+              ...normDirect,
+              rawText: rawDirect,
+              processedImageCrop: directCanvas.toDataURL('image/jpeg', 0.85)
+            };
+          }
         }
 
         return null;

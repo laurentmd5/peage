@@ -439,13 +439,23 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       if (!ctx) return;
       ctx.drawImage(img, 0, 0);
 
-      // Target area: central 75% width, 50% height
-      const rw = Math.round(canvas.width * 0.75);
-      const rh = Math.round(canvas.height * 0.50);
+      // Primary candidate: lower-center bumper zone where license plate is mounted
+      const rw = Math.round(canvas.width * 0.65);
+      const rh = Math.round(canvas.height * 0.45);
       const rx = Math.round((canvas.width - rw) / 2);
-      const ry = Math.round(canvas.height * 0.30);
+      const ry = Math.round(canvas.height * 0.40);
 
-      const ocrResult = await anprOcrService.recognizePlate(canvas, [rx, ry, rw, rh]);
+      let ocrResult = await anprOcrService.recognizePlate(canvas, [rx, ry, rw, rh]);
+
+      // Fallback candidate: broader center zone
+      if (!ocrResult) {
+        const rw2 = Math.round(canvas.width * 0.80);
+        const rh2 = Math.round(canvas.height * 0.55);
+        const rx2 = Math.round((canvas.width - rw2) / 2);
+        const ry2 = Math.round(canvas.height * 0.25);
+        ocrResult = await anprOcrService.recognizePlate(canvas, [rx2, ry2, rw2, rh2]);
+      }
+
       if (ocrResult && ocrResult.plateNumber && ocrResult.plateNumber.length >= 4) {
         console.log('[ANPR OCR] 🎯 Plaque lue sur le flux Hikvision:', ocrResult.plateNumber);
         const res = await api.detectVehicle(selectedLane, ocrResult.plateNumber, 'CAT2');

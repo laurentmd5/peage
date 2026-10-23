@@ -1,0 +1,100 @@
+name: CI/CD - Test & Auto-Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  # Étape 1 : Validation continue (Tests & Build)
+  test-and-build:
+    name: Run Tests & Verify Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Vitest Unit & Integration Tests
+        run: npm run test:all
+
+      - name: Build React Client Bundle
+        run: npm run build:client
+
+  # Étape 2 : Déploiement automatique sur le VPS
+  deploy:
+    name: Deploy to VPS
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          envs: TARGET_DIR
+          script: |
+            TARGET_DIR="${{ secrets.VPS_TARGET_DIR || '/var/www/peage' }}"
+            REPO_URL="https://github.com/${{ github.repository }}.git"
+
+            echo "🚀 [CI/CD] Début du déploiement sur le VPS..."
+            echo "📁 Dossier cible : $TARGET_DIR"
+
+            # 1. Vérifier ou cloner le projet si premier déploiement
+            if [ ! -d "$TARGET_DIR/.git" ]; then
+              echo "==> Premier déploiement détecté, clonage du dépôt..."
+              mkdir -p "$TARGET_DIR"
+              git clone "$REPO_URL" "$TARGET_DIR"
+            fi
+
+            cd "$TARGET_DIR"
+
+            # 2. Récupérer la dernière version de main
+            echo "==> Mise à jour du code source..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            # 3. Déploiement (Support automatique Docker Compose ou Node/PM2)
+            if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+              echo "🐳 Déploiement via Docker Compose..."
+              docker compose down --remove-orphans || true
+              docker compose up -d --build
+              docker image prune -f
+            elif command -v pm2 &> /dev/null; then
+              echo "⚡ Déploiement via Node.js + PM2..."
+              npm ci
+              npm run build:client
+              pm2 restart peage || pm2 start npm --name "peage" -- start
+              pm2 save
+            else
+              echo "⚙️ Déploiement standard Node.js..."
+              npm ci
+              npm run build:client
+              # Relance le processus en arrière-plan
+              pkill -f "tsx server/src/index.ts" || true
+              nohup npm start > peage.log 2>&1 &
+            fi
+
+            # 4. Vérification du statut de santé
+            echo "==> Vérification de la disponibilité du serveur..."
+            sleep 5
+            if command -v curl &> /dev/null; then
+              curl -s http://localhost:3001/api/health || echo "Serveur en cours d'initialisation..."
+            fi
+
+            echo "✅ [CI/CD] Déploiement terminé avec succès sur le VPS !"

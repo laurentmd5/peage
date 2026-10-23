@@ -335,7 +335,7 @@ export const TransactionsList: React.FC<TransactionsListProps> = ({ currentUser 
 
           {txToCancel && (
             <div className="bg-slate-800 p-3 rounded-lg text-xs space-y-1">
-              <div>Ticket : <span className="font-mono text-white">{txToCancel.ticketNumber}</span></div>
+              <div>{language === 'fr' ? 'Ticket :' : 'Ticket:'} <span className="font-mono text-white">{txToCancel.ticketNumber}</span></div>
               <div>{language === 'fr' ? 'Plaque :' : 'Plate:'} <span className="font-bold text-white">{txToCancel.plateNumber}</span></div>
               <div>{language === 'fr' ? 'Montant :' : 'Amount:'} <span className="font-bold text-emerald-400">{txToCancel.amountDue} FCFA</span></div>
             </div>

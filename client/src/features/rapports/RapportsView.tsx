@@ -209,12 +209,12 @@ export const RapportsView: React.FC = () => {
             <div>
               <div className="text-xl font-black tracking-wider uppercase">{t('officialReportHeader')}</div>
               <div className="text-xs text-slate-600">{t('centralStation')} • {t('officialReportSub')}</div>
-              <div className="text-xs text-slate-600">Avenida dos Combatentes • Bissau, Guinée-Bissau • Tél : +245 955 00 00 00</div>
+              <div className="text-xs text-slate-600">Avenida dos Combatentes • Bissau, {language === 'fr' ? 'Guinée-Bissau • Tél :' : 'Guinea-Bissau • Tel:'} +245 955 00 00 00</div>
             </div>
 
             <div className="text-right text-xs">
               <div className="font-bold uppercase tracking-wider text-slate-900">{language === 'fr' ? 'RAPPORT OFFICIEL D\'EXPLOITATION' : 'OFFICIAL OPERATIONAL STATEMENT'}</div>
-              <div className="text-slate-600">Réf : RPT-{startDate.replace(/-/g, '')}-{endDate.replace(/-/g, '')}</div>
+              <div className="text-slate-600">{language === 'fr' ? 'Réf :' : 'Ref:'} RPT-{startDate.replace(/-/g, '')}-{endDate.replace(/-/g, '')}</div>
               <div className="text-slate-600">{language === 'fr' ? 'Émis le :' : 'Issued on:'} {new Date().toLocaleDateString(language === 'fr' ? 'fr-FR' : 'en-US')}</div>
             </div>
           </div>
@@ -228,7 +228,7 @@ export const RapportsView: React.FC = () => {
             <div>
               <div className="text-xs text-slate-500 uppercase font-semibold">{t('totalRevenuesReport')}</div>
               <div className="text-2xl font-black text-emerald-600">
-                {report.totalRevenue.toLocaleString('fr-FR')} FCFA
+                {report.totalRevenue.toLocaleString(language === 'fr' ? 'fr-FR' : 'en-US')} FCFA
               </div>
             </div>
             <div>

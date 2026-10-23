@@ -17,10 +17,21 @@ import {
 import { useTranslation } from '../../services/i18n.tsx';
 
 export const Dashboard: React.FC = () => {
-  const { t, language } = useTranslation();
+  const { t, language, tCategory } = useTranslation();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+
+  const getPaymentMethodLabel = (method: string): string => {
+    switch (method) {
+      case 'ESPECES': return t('cashLabel');
+      case 'WAVE': return t('waveLabel');
+      case 'ORANGE_MONEY': return t('orangeLabel');
+      case 'CARTE': return t('cardLabel');
+      case 'RFID': return t('rfidLabel');
+      default: return method;
+    }
+  };
 
   const fetchStats = async () => {
     try {
@@ -217,7 +228,7 @@ export const Dashboard: React.FC = () => {
                 <div key={idx} className="space-y-1">
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-300">
-                      [{cat.code}] {cat.label}
+                      [{cat.code}] {tCategory(cat.code, cat.label)}
                     </span>
                     <span className="font-semibold text-emerald-400">
                       {cat.count} ({cat.percentage}%)
@@ -241,11 +252,11 @@ export const Dashboard: React.FC = () => {
             <div className="grid grid-cols-2 gap-2 text-xs">
               {stats?.paymentDistribution.map((pm, idx) => (
                 <div key={idx} className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/60 space-y-1">
-                  <div className="text-slate-400">{pm.label}</div>
+                  <div className="text-slate-400">{getPaymentMethodLabel(pm.method || pm.label)}</div>
                   <div className="font-bold text-white text-sm">
-                    {pm.total.toLocaleString('fr-FR')} FCFA
+                    {pm.total.toLocaleString(language === 'fr' ? 'fr-FR' : 'en-US')} FCFA
                   </div>
-                  <div className="text-[11px] text-slate-400">{pm.count} transactions</div>
+                  <div className="text-[11px] text-slate-400">{pm.count} {language === 'fr' ? 'transactions' : 'transactions'}</div>
                 </div>
               ))}
             </div>
@@ -282,13 +293,13 @@ export const Dashboard: React.FC = () => {
                       {tx.plateNumber}
                     </td>
                     <td className="px-3 py-2 text-slate-300">
-                      [{tx.categoryCode}]
+                      [{tx.categoryCode}] {tCategory(tx.categoryCode)}
                     </td>
                     <td className="px-3 py-2 font-bold text-emerald-400">
-                      {tx.amountDue.toLocaleString('fr-FR')} F
+                      {tx.amountDue.toLocaleString(language === 'fr' ? 'fr-FR' : 'en-US')} FCFA
                     </td>
                     <td className="px-3 py-2 text-slate-300">
-                      {tx.paymentMethod}
+                      {getPaymentMethodLabel(tx.paymentMethod)}
                     </td>
                     <td className="px-3 py-2 text-slate-400">
                       {tx.cashierName}

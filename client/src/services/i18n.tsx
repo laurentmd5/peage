@@ -420,6 +420,7 @@ export const CATEGORY_LABELS: Record<string, { fr: string; en: string }> = {
   CAT3: { fr: 'Catégorie 3 (Canter, Bus & Mini-camions)', en: 'Category 3 (Canter, Buses & Mini-Trucks)' },
   CAT4: { fr: 'Catégorie 4 (Camions porteurs 7t à 20t)', en: 'Category 4 (Trucks 7t to 20t)' },
   CAT5: { fr: 'Catégorie 5 (Semi-remorques & Trains routiers >20t)', en: 'Category 5 (Semi-Trailers & Heavy Trailers >20t)' },
+  CAT6: { fr: 'Catégorie 6 (Véhicules Exceptionnels / Convois)', en: 'Category 6 (Exceptional Vehicles / Convoys)' },
   MOTO: { fr: 'Moto', en: 'Motorcycle' },
   VL: { fr: 'Véhicule léger', en: 'Light Vehicle' },
   TAXI: { fr: 'Taxi / VTC', en: 'Taxi / Rideshare' },

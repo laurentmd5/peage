@@ -71,6 +71,7 @@ export async function generateReceiptPdf(tx: TollTransaction, lang?: PdfLanguage
     CAT3: 'Category 3 (Canter, Buses & Mini-Trucks)',
     CAT4: 'Category 4 (Trucks 7t to 20t)',
     CAT5: 'Category 5 (Semi-Trailers & Heavy Trailers >20t)',
+    CAT6: 'Category 6 (Exceptional Vehicles / Convoys)',
     MOTO: 'Motorcycle',
     VL: 'Light Vehicle',
     TAXI: 'Taxi / Rideshare',

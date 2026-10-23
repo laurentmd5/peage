@@ -737,16 +737,16 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                             <button
                               type="button"
                               onClick={handleUnlockPlate}
-                              title="Relire une plaque / Déverrouiller"
+                              title={language === 'fr' ? "Relire une plaque / Déverrouiller" : "Rescan plate / Unlock"}
                               className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[9px] border border-slate-600 pointer-events-auto cursor-pointer"
                             >
-                              🔄 Relire
+                              {language === 'fr' ? '🔄 Relire' : '🔄 Rescan'}
                             </button>
                           </div>
                         ) : (
                           <span className="text-amber-300 animate-pulse text-[9px] flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-                            <span>Centrer la plaque dans le viseur</span>
+                            <span>{language === 'fr' ? 'Centrer la plaque dans le viseur' : 'Center plate in viewfinder'}</span>
                           </span>
                         )}
                       </div>
@@ -777,10 +777,10 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                               </span>
                             </div>
                             <div className="text-[11px] text-emerald-400 font-mono font-bold flex flex-wrap items-center gap-2 mt-0.5">
-                              <span>Tarif : {formatCurrency(liveDetection.tariff)} FCFA</span>
+                              <span>{language === 'fr' ? 'Tarif :' : 'Fee:'} {formatCurrency(liveDetection.tariff)} FCFA</span>
                             </div>
                             <div className="flex items-center gap-2 mt-1">
-                              <span className="text-[11px] text-slate-300 font-mono font-bold">Plaque :</span>
+                              <span className="text-[11px] text-slate-300 font-mono font-bold">{t('plateLabel')} :</span>
                               <input
                                 type="text"
                                 id="input-webcam-plate"
@@ -798,7 +798,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                               />
                               {isPlateManuallyEdited && (
                                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 font-mono font-bold">
-                                  ✏️ Manuel
+                                  {language === 'fr' ? '✏️ Manuel' : '✏️ Manual'}
                                 </span>
                               )}
                               {liveDetection.isOcrLiveRead ? (
@@ -811,7 +811,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                               ) : (
                                 <span className="text-[9px] text-amber-400 flex items-center gap-1 font-mono">
                                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-                                  <span>(Lecture OCR en cours...)</span>
+                                  <span>{language === 'fr' ? '(Lecture OCR en cours...)' : '(OCR Reading in progress...)'}</span>
                                 </span>
                               )}
                             </div>
@@ -826,7 +826,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         >
                           <Zap className="w-3.5 h-3.5" />
                           <span>
-                            Valider {webcamPlateInput || liveDetection.plateNumberSuggestion || 'Véhicule'}
+                            {language === 'fr' ? 'Valider' : 'Confirm'} {webcamPlateInput || liveDetection.plateNumberSuggestion || (language === 'fr' ? 'Véhicule' : 'Vehicle')}
                           </span>
                         </button>
                       </div>
@@ -894,16 +894,16 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                               ? 'bg-blue-500/20 text-blue-300 border-blue-500/50'
                               : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-600'
                           }`}
-                          title="Paramètres de liaison et URL Webhook"
+                          title={language === 'fr' ? "Paramètres de liaison et URL Webhook" : "Network link and Webhook URL settings"}
                         >
                           <Settings className="w-3 h-3 text-blue-400" />
-                          <span>Liaison Réseau</span>
+                          <span>{language === 'fr' ? 'Liaison Réseau' : 'Network Link'}</span>
                         </button>
 
                         <div className="flex items-center gap-2 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
                           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
                           <span className="text-[10px] font-mono font-bold text-emerald-400">
-                            SURVEILLANCE ACTIVE
+                            {language === 'fr' ? 'SURVEILLANCE ACTIVE' : 'ACTIVE SURVEILLANCE'}
                           </span>
                         </div>
                       </div>
@@ -915,17 +915,17 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                           <div className="font-bold text-white flex items-center gap-2">
                             <Settings className="w-4 h-4 text-blue-400" />
-                            <span>Configuration Réseau Dynamique</span>
+                            <span>{language === 'fr' ? 'Configuration Réseau Dynamique' : 'Dynamic Network Configuration'}</span>
                           </div>
                           <span className="text-[10px] font-mono text-emerald-400">
-                            IP Serveur : {networkInfo?.primaryServerIp || window.location.hostname}
+                            {language === 'fr' ? 'IP Serveur :' : 'Server IP:'} {networkInfo?.primaryServerIp || window.location.hostname}
                           </span>
                         </div>
 
                         {/* URL Webhook à renseigner dans la caméra */}
                         <div className="space-y-1">
                           <label className="text-[11px] font-semibold text-slate-300">
-                            URL Webhook (à saisir dans le menu HTTP / Alarm Server de votre caméra) :
+                            {language === 'fr' ? 'URL Webhook (à saisir dans le menu HTTP / Alarm Server de votre caméra) :' : 'Webhook URL (to enter in your camera HTTP / Alarm Server settings):'}
                           </label>
                           <div className="flex items-center gap-2">
                             <input
@@ -950,11 +950,13 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                               className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center gap-1.5"
                             >
                               {copiedUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                              <span>{copiedUrl ? 'Copié !' : 'Copier'}</span>
+                              <span>{copiedUrl ? (language === 'fr' ? 'Copié !' : 'Copied!') : (language === 'fr' ? 'Copier' : 'Copy')}</span>
                             </button>
                           </div>
                           <p className="text-[10px] text-slate-400">
-                            💡 Cette URL s'adapte automatiquement à l'adresse IP réelle de la machine sans aucun code en dur.
+                            {language === 'fr'
+                              ? "💡 Cette URL s'adapte automatiquement à l'adresse IP réelle de la machine sans aucun code en dur."
+                              : "💡 This URL automatically adapts to the host machine's actual IP address with zero hardcoded values."}
                           </p>
                         </div>
 
@@ -962,11 +964,11 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         <div className="space-y-1">
                           <div className="flex items-center justify-between">
                             <label className="text-[11px] font-semibold text-slate-300">
-                              Adresse IP de la Caméra (Optionnel, pour le retour vidéo) :
+                              {language === 'fr' ? 'Adresse IP de la Caméra (Optionnel, pour le retour vidéo) :' : 'Camera IP Address (Optional, for live video feed):'}
                             </label>
                             {networkInfo?.activeCameraIp && (
                               <span className="text-[10px] font-mono text-emerald-400">
-                                Détectée automatiquement : {networkInfo.activeCameraIp}
+                                {language === 'fr' ? 'Détectée automatiquement :' : 'Auto-detected:'} {networkInfo.activeCameraIp}
                               </span>
                             )}
                           </div>
@@ -991,7 +993,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                 }}
                                 className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs"
                               >
-                                Utiliser l'IP détectée
+                                {language === 'fr' ? "Utiliser l'IP détectée" : "Use auto-detected IP"}
                               </button>
                             )}
                           </div>
@@ -1106,7 +1108,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         className="p-2.5 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/40 rounded-xl text-center transition-all hover:scale-105 flex flex-col items-center gap-1 group disabled:opacity-50"
                       >
                         <div className="w-8 h-8 rounded-lg bg-sky-400/20 flex items-center justify-center text-base">🚗</div>
-                        <div className="text-[11px] font-bold text-sky-300">Cat 2 : Voiture/Pickup</div>
+                        <div className="text-[11px] font-bold text-sky-300">{language === 'fr' ? 'Cat 2 : Voiture/Pickup' : 'Cat 2: Car/Pickup'}</div>
                         <div className="text-[10px] font-mono text-sky-400 font-bold">500 FCFA</div>
                       </button>
 
@@ -1118,7 +1120,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         className="p-2.5 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/40 rounded-xl text-center transition-all hover:scale-105 flex flex-col items-center gap-1 group disabled:opacity-50"
                       >
                         <div className="w-8 h-8 rounded-lg bg-indigo-400/20 flex items-center justify-center text-base">🚌</div>
-                        <div className="text-[11px] font-bold text-indigo-300">Cat 3 : Canter/Bus</div>
+                        <div className="text-[11px] font-bold text-indigo-300">{language === 'fr' ? 'Cat 3 : Canter/Bus' : 'Cat 3: Bus/Minivan'}</div>
                         <div className="text-[10px] font-mono text-indigo-400 font-bold">1 500 FCFA</div>
                       </button>
 
@@ -1130,7 +1132,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         className="p-2.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/40 rounded-xl text-center transition-all hover:scale-105 flex flex-col items-center gap-1 group disabled:opacity-50"
                       >
                         <div className="w-8 h-8 rounded-lg bg-purple-400/20 flex items-center justify-center text-base">🚚</div>
-                        <div className="text-[11px] font-bold text-purple-300">Cat 4 : Camion 7-20t</div>
+                        <div className="text-[11px] font-bold text-purple-300">{language === 'fr' ? 'Cat 4 : Camion 7-20t' : 'Cat 4: Truck 7-20t'}</div>
                         <div className="text-[10px] font-mono text-purple-400 font-bold">5 000 FCFA</div>
                       </button>
 
@@ -1142,7 +1144,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         className="p-2.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/40 rounded-xl text-center transition-all hover:scale-105 flex flex-col items-center gap-1 group disabled:opacity-50 col-span-2 sm:col-span-1"
                       >
                         <div className="w-8 h-8 rounded-lg bg-rose-400/20 flex items-center justify-center text-base">🚛</div>
-                        <div className="text-[11px] font-bold text-rose-300">Cat 5 : Semi &gt;20t</div>
+                        <div className="text-[11px] font-bold text-rose-300">{language === 'fr' ? 'Cat 5 : Semi >20t' : 'Cat 5: Semi-Trailer >20t'}</div>
                         <div className="text-[10px] font-mono text-rose-400 font-bold">10 000 FCFA</div>
                       </button>
                     </div>
@@ -1448,9 +1450,13 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                 <div className="bg-slate-800/60 rounded-xl p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-slate-300">
-                      Simulation Débit {paymentMethod === 'WAVE' ? 'Wave Mobile Money' : 'Orange Money'}
+                      {paymentMethod === 'WAVE'
+                        ? (language === 'fr' ? 'Simulation Débit Wave Mobile Money' : 'Wave Mobile Money Debit Simulation')
+                        : (language === 'fr' ? 'Simulation Débit Orange Money' : 'Orange Money Debit Simulation')}
                     </span>
-                    <span className="text-xs text-slate-400">Délai simulé : ~1,5s</span>
+                    <span className="text-xs text-slate-400">
+                      {language === 'fr' ? 'Délai simulé : ~1,5s' : 'Simulated delay: ~1.5s'}
+                    </span>
                   </div>
                   <div>
                     <label className="block text-xs text-slate-400 mb-1">
@@ -1626,7 +1632,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                 <div className="flex items-center justify-between font-mono text-[11px] font-bold text-slate-200">
                   <span className="flex items-center gap-1.5">
                     <span className="text-emerald-400">📹</span>
-                    <span>NVR 4 Voies REC</span>
+                    <span>{language === 'fr' ? 'NVR 4 Voies REC' : '4-Lane NVR REC'}</span>
                   </span>
                   <span className="flex items-center gap-1 text-[9px] text-emerald-400">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>

@@ -155,7 +155,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 onClick={() => quickLogin('caissier1', 'caisse123')}
                 className="p-2 bg-slate-800 hover:bg-slate-700 text-left rounded-lg border border-slate-700 transition-colors"
               >
-                <div className="font-bold text-emerald-400">Caissier 1</div>
+                <div className="font-bold text-emerald-400">{language === 'fr' ? 'Caissier 1' : 'Cashier 1'}</div>
                 <div className="text-[10px] text-slate-400">{t('cashier1Sub')}</div>
               </button>
 
@@ -165,7 +165,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 onClick={() => quickLogin('superviseur', 'super123')}
                 className="p-2 bg-slate-800 hover:bg-slate-700 text-left rounded-lg border border-slate-700 transition-colors"
               >
-                <div className="font-bold text-indigo-400">Superviseur</div>
+                <div className="font-bold text-indigo-400">{language === 'fr' ? 'Superviseur' : 'Supervisor'}</div>
                 <div className="text-[10px] text-slate-400">{t('superviseurSub')}</div>
               </button>
 
@@ -175,7 +175,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 onClick={() => quickLogin('admin', 'admin123')}
                 className="p-2 bg-slate-800 hover:bg-slate-700 text-left rounded-lg border border-slate-700 transition-colors"
               >
-                <div className="font-bold text-amber-400">Administrateur</div>
+                <div className="font-bold text-amber-400">{language === 'fr' ? 'Administrateur' : 'Administrator'}</div>
                 <div className="text-[10px] text-slate-400">{t('adminSub')}</div>
               </button>
 
@@ -185,7 +185,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 onClick={() => quickLogin('caissier2', 'caisse123')}
                 className="p-2 bg-slate-800 hover:bg-slate-700 text-left rounded-lg border border-slate-700 transition-colors"
               >
-                <div className="font-bold text-emerald-400">Caissier 2</div>
+                <div className="font-bold text-emerald-400">{language === 'fr' ? 'Caissier 2' : 'Cashier 2'}</div>
                 <div className="text-[10px] text-slate-400">{t('cashier2Sub')}</div>
               </button>
             </div>

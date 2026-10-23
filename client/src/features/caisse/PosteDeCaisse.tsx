@@ -11,6 +11,7 @@ import { generateReceiptPdf, formatCurrency } from '../../services/receiptPdf.ts
 import { Modal } from '../../components/Modal.tsx';
 import { useTranslation } from '../../services/i18n.tsx';
 import { aiVisionService, VehicleDetectionResult } from '../../services/aiVisionService.ts';
+import { anprOcrService } from '../../services/anprOcrService.ts';
 import { hardwarePrintingService } from '../../services/hardwarePrintingService.ts';
 import {
   Car,
@@ -72,6 +73,8 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   // Real Hardware: Industrial ANPR Camera states (Dynamic IP & Network, no hardcoded values)
   const [cameraIp, setCameraIp] = useState<string>(() => localStorage.getItem('toll_camera_ip') || '');
   const [cameraStatusMsg, setCameraStatusMsg] = useState<string | null>(null);
+  const hikvisionImgRef = useRef<HTMLImageElement | null>(null);
+  const [isScanningHikvision, setIsScanningHikvision] = useState(false);
   const [networkInfo, setNetworkInfo] = useState<{
     serverIps?: string[];
     primaryServerIp?: string;
@@ -420,6 +423,57 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       }
     }).catch(() => {});
   }, [cameraIp]);
+
+  // Automated & On-Demand AI OCR scanning on Hikvision Live Stream
+  const scanHikvisionFrame = async () => {
+    if (!hikvisionImgRef.current || step !== 'WAITING' || isScanningHikvision) return;
+    try {
+      setIsScanningHikvision(true);
+      const img = hikvisionImgRef.current;
+      if (!img.naturalWidth || !img.naturalHeight) return;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+
+      // Target area: central 75% width, 50% height
+      const rw = Math.round(canvas.width * 0.75);
+      const rh = Math.round(canvas.height * 0.50);
+      const rx = Math.round((canvas.width - rw) / 2);
+      const ry = Math.round(canvas.height * 0.30);
+
+      const ocrResult = await anprOcrService.recognizePlate(canvas, [rx, ry, rw, rh]);
+      if (ocrResult && ocrResult.plateNumber && ocrResult.plateNumber.length >= 4) {
+        console.log('[ANPR OCR] 🎯 Plaque lue sur le flux Hikvision:', ocrResult.plateNumber);
+        const res = await api.detectVehicle(selectedLane, ocrResult.plateNumber, 'CAT2');
+        setDetection(res);
+        setAmountPaid(res.amountDue);
+        setStep('DETECTED');
+        setCameraStatusMsg(`✅ Plaque reconnue en direct : ${ocrResult.plateNumber} (${ocrResult.countryLabel || 'Auto'})`);
+      }
+    } catch (e) {
+      console.warn('OCR error on Hikvision frame:', e);
+    } finally {
+      setIsScanningHikvision(false);
+    }
+  };
+
+  // Continuous auto-scan on Hikvision live feed while in waiting state
+  useEffect(() => {
+    let interval: any = null;
+    if (cameraMode === 'HIKVISION' && step === 'WAITING') {
+      anprOcrService.init().catch(() => {});
+      interval = setInterval(() => {
+        scanHikvisionFrame();
+      }, 1500);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [cameraMode, step, isScanningHikvision]);
 
   const handleTestHikvisionWebhook = async () => {
     setIsTestingHikvision(true);
@@ -1012,6 +1066,8 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                     <div className="relative rounded-xl overflow-hidden border border-blue-500/40 bg-black aspect-video flex items-center justify-center shadow-inner group">
                       {/* Live Continuous Video Stream from Real Hikvision ANPR Camera */}
                       <img
+                        ref={hikvisionImgRef}
+                        crossOrigin="anonymous"
                         src="/api/toll/camera-stream"
                         alt="Camera Live Feed"
                         onError={(e) => {
@@ -1053,15 +1109,29 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                       </div>
                     </div>
 
-                    {/* Clean Status Footer */}
-                    <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs">
+                    {/* Clean Status Footer & Instant Manual/Auto Scan Trigger */}
+                    <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
                       <div className="flex items-center gap-2 text-slate-300">
                         <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                        <span>{t('anprWaitingVehicle')}</span>
+                        <span>{isScanningHikvision ? (language === 'fr' ? 'Analyse OCR en cours...' : 'OCR Reading in progress...') : t('anprWaitingVehicle')}</span>
                       </div>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
-                        {t('anprAutomatedBadge')}
-                      </span>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          id="btn-scan-hikvision-now"
+                          onClick={scanHikvisionFrame}
+                          disabled={isScanningHikvision}
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md hover:scale-105 transition-all cursor-pointer"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-slate-950 fill-slate-950" />
+                          <span>{language === 'fr' ? '⚡ Détecter la Plaque' : '⚡ Detect Plate'}</span>
+                        </button>
+
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                          {t('anprAutomatedBadge')}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>

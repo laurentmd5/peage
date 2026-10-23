@@ -1,0 +1,8 @@
+streams:
+  hikvision: rtsp://admin:Passer12@192.168.1.64:554/Streaming/Channels/102
+
+api:
+  listen: ":1984"
+
+webrtc:
+  listen: ":8555"

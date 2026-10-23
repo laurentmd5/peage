@@ -1010,17 +1010,21 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
 
                     {/* Camera Live Preview & Optical Targeting */}
                     <div className="relative rounded-xl overflow-hidden border border-blue-500/40 bg-black aspect-video flex items-center justify-center shadow-inner group">
-                      {/* Background Optical Frame or Image */}
-                      {cameraIp ? (
-                        <img
-                          src={`http://${cameraIp}/ISAPI/Streaming/channels/101/picture?t=${Date.now()}`}
-                          alt="Camera Live Feed"
-                          onError={(e) => {
-                            (e.target as HTMLElement).style.display = 'none';
-                          }}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : null}
+                      {/* Live Continuous Video Stream from Real Hikvision ANPR Camera */}
+                      <img
+                        src="/api/toll/camera-stream"
+                        alt="Camera Live Feed"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          setTimeout(() => {
+                            target.src = `/api/toll/camera-stream?t=${Date.now()}`;
+                          }, 2000);
+                        }}
+                        className="w-full h-full object-cover"
+                      />
+
+                      {/* Scanning Line Animation (like Webcam) */}
+                      <div className="absolute inset-x-0 h-0.5 bg-blue-400 shadow-[0_0_8px_#60a5fa] animate-[bounce_2s_infinite] pointer-events-none"></div>
 
                       {/* Optical HUD Overlay */}
                       <div className="absolute inset-0 flex flex-col justify-between p-3 pointer-events-none bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/60">

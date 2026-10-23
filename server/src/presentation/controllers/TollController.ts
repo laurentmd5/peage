@@ -267,5 +267,64 @@ export function createTollRouter(
     res.json(NetworkService.getNetworkInfo(serverPort));
   });
 
+  // 12. Proxy de flux vidéo direct MJPEG pour affichage temps réel dans le navigateur
+  router.get(['/camera-stream', '/anpr-stream', '/camera-live'], async (_req, res) => {
+    try {
+      const http = await import('http');
+      const proxyReq = http.request('http://127.0.0.1:1984/api/stream.mjpeg?src=hikvision', (proxyRes) => {
+        res.writeHead(proxyRes.statusCode || 200, {
+          'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Connection': 'close',
+          'Pragma': 'no-cache'
+        });
+        proxyRes.pipe(res);
+      });
+
+      proxyReq.on('error', () => {
+        if (!res.headersSent) {
+          res.status(502).json({ error: 'Flux vidéo indisponible' });
+        }
+      });
+
+      _req.on('close', () => {
+        proxyReq.destroy();
+      });
+
+      proxyReq.end();
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
+  // 13. Instantané en direct (Snapshot JPEG)
+  router.get(['/camera-snapshot', '/camera/snapshot'], async (_req, res) => {
+    try {
+      const http = await import('http');
+      const proxyReq = http.request('http://127.0.0.1:1984/api/frame.jpeg?src=hikvision', (proxyRes) => {
+        res.writeHead(proxyRes.statusCode || 200, {
+          'Content-Type': 'image/jpeg',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        });
+        proxyRes.pipe(res);
+      });
+
+      proxyReq.on('error', () => {
+        if (!res.headersSent) {
+          res.status(502).json({ error: 'Instantané indisponible' });
+        }
+      });
+
+      proxyReq.end();
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
   return router;
 }

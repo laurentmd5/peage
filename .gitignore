@@ -33,6 +33,7 @@ pnpm-debug.log*
 # Editor & OS artifacts
 .vscode/
 .idea/
+bin/*.exe
 *.suo
 *.ntvs*
 *.njsproj

@@ -56,10 +56,10 @@ export const api = {
   getUsers: () => request<User[]>('/auth/users'),
 
   // Toll
-  detectVehicle: (laneId: string = 'CAISSE-01', plate?: string, category?: string) =>
+  detectVehicle: (laneId: string = 'CAISSE-01', plate?: string, category?: string, vehicleImageUrl?: string) =>
     request<VehicleDetection>('/toll/detect', {
       method: 'POST',
-      body: JSON.stringify({ laneId, plate, category })
+      body: JSON.stringify({ laneId, plate, category, vehicleImageUrl })
     }),
 
   processPayment: (payload: {

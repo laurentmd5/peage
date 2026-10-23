@@ -60,7 +60,7 @@ class AnprOcrService {
     rw: number,
     rh: number
   ): { x: number; y: number; w: number; h: number } {
-    if (rw < 40 || rh < 20) return { x: rx, y: ry, w: rw, h: rh };
+    if (rw < 60 || rh < 20) return { x: rx, y: ry, w: rw, h: rh };
 
     try {
       const c = document.createElement('canvas');
@@ -76,7 +76,7 @@ class AnprOcrService {
         for (let x = 0; x < rw; x++) {
           const idx = (y * rw + x) * 4;
           const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-          if (lum > 165) rowBright[y]++;
+          if (lum > 155) rowBright[y]++;
         }
       }
 
@@ -101,7 +101,7 @@ class AnprOcrService {
         }
       }
 
-      if (maxRun >= 12 && bestStartY !== -1) {
+      if (maxRun >= 14 && bestStartY !== -1) {
         const padY = Math.round(maxRun * 0.15);
         const py = Math.max(0, bestStartY - padY);
         const ph = Math.min(rh - py, (bestEndY - bestStartY) + padY * 2);
@@ -111,26 +111,27 @@ class AnprOcrService {
           for (let x = 0; x < rw; x++) {
             const idx = (y * rw + x) * 4;
             const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-            if (lum > 165) colBright[x]++;
+            if (lum > 155) colBright[x]++;
           }
         }
 
         let minX = rw;
         let maxX = 0;
         for (let x = 0; x < rw; x++) {
-          if (colBright[x] > (bestEndY - bestStartY) * 0.20) {
+          if (colBright[x] > (bestEndY - bestStartY) * 0.18) {
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
           }
         }
 
-        if (maxX > minX + 40) {
-          const padX = Math.round((maxX - minX) * 0.05);
+        const candidateW = maxX - minX;
+        const candidateH = bestEndY - bestStartY;
+        // Verify realistic aspect ratio & min dimensions for a vehicle license plate
+        if (candidateW >= 60 && candidateH >= 14 && candidateW > candidateH * 1.4) {
+          const padX = Math.round(candidateW * 0.05);
           const px = Math.max(0, minX - padX);
-          const pw = Math.min(rw - px, (maxX - minX) + padX * 2);
-          if (pw >= 50 && ph >= 16) {
-            return { x: rx + px, y: ry + py, w: pw, h: ph };
-          }
+          const pw = Math.min(rw - px, candidateW + padX * 2);
+          return { x: rx + px, y: ry + py, w: pw, h: ph };
         }
       }
     } catch {
@@ -153,9 +154,9 @@ class AnprOcrService {
     cropH: number,
     mode: 'adaptive' | 'otsu' = 'adaptive'
   ): HTMLCanvasElement {
-    const scale = 2.0;
-    const targetW = Math.max(200, Math.round(cropW * scale));
-    const targetH = Math.max(50, Math.round(cropH * scale));
+    const scale = Math.max(1.8, Math.min(3.5, 320 / Math.max(1, cropW)));
+    const targetW = Math.max(220, Math.round(cropW * scale));
+    const targetH = Math.max(55, Math.round(cropH * scale));
 
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = targetW;
@@ -176,6 +177,18 @@ class AnprOcrService {
       gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
     }
 
+    const margin = 16;
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = targetW + margin * 2;
+    outCanvas.height = targetH + margin * 2;
+    const outCtx = outCanvas.getContext('2d');
+    if (!outCtx) return tempCanvas;
+
+    outCtx.fillStyle = '#ffffff';
+    outCtx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+    const outImg = outCtx.getImageData(margin, margin, targetW, targetH);
+    const outData = outImg.data;
+
     if (mode === 'adaptive') {
       // 1. Integral Image Calculation
       const intImg = new Float64Array((targetW + 1) * (targetH + 1));
@@ -188,19 +201,7 @@ class AnprOcrService {
       }
 
       const S = Math.round(targetW / 18);
-      const T = 0.12; // 12% lower than local neighborhood mean to cleanly isolate character strokes and sever separator dots
-
-      const outCanvas = document.createElement('canvas');
-      const margin = 16;
-      outCanvas.width = targetW + margin * 2;
-      outCanvas.height = targetH + margin * 2;
-      const outCtx = outCanvas.getContext('2d');
-      if (!outCtx) return tempCanvas;
-
-      outCtx.fillStyle = '#ffffff';
-      outCtx.fillRect(0, 0, outCanvas.width, outCanvas.height);
-      const outImg = outCtx.getImageData(margin, margin, targetW, targetH);
-      const outData = outImg.data;
+      const T = 0.12;
 
       for (let y = 0; y < targetH; y++) {
         for (let x = 0; x < targetW; x++) {
@@ -230,7 +231,7 @@ class AnprOcrService {
       return outCanvas;
     }
 
-    // Mode: 'otsu' (Strict non-inverting polarity for clean plates)
+    // Mode: 'otsu'
     let minLum = 255;
     let maxLum = 0;
     for (let i = 0; i < total; i++) {
@@ -268,14 +269,6 @@ class AnprOcrService {
       }
     }
 
-    const outCanvas = document.createElement('canvas');
-    outCanvas.width = targetW;
-    outCanvas.height = targetH;
-    const outCtx = outCanvas.getContext('2d');
-    if (!outCtx) return tempCanvas;
-    const outImg = outCtx.createImageData(targetW, targetH);
-    const outData = outImg.data;
-
     for (let i = 0; i < data.length; i += 4) {
       const isChar = gray[i / 4] < threshold;
       const finalVal = isChar ? 0 : 255;
@@ -285,7 +278,7 @@ class AnprOcrService {
       outData[i + 3] = 255;
     }
 
-    outCtx.putImageData(outImg, 0, 0);
+    outCtx.putImageData(outImg, margin, margin);
     return outCanvas;
   }
 
@@ -366,6 +359,21 @@ class AnprOcrService {
               ...normDirect,
               rawText: rawDirect,
               processedImageCrop: directCanvas.toDataURL('image/jpeg', 0.85)
+            };
+          }
+        }
+
+        // Pass 4: Fallback to full optical reticle bounding box (crucial for papers and large plates)
+        if (plateCrop.w !== cropW || plateCrop.h !== cropH) {
+          const reticleAdapt = this.preprocessPlateImage(srcCanvas, cropX, cropY, cropW, cropH, 'adaptive');
+          const resReticle = await this.worker.recognize(reticleAdapt);
+          const rawReticle = resReticle.data.text ? resReticle.data.text.trim() : '';
+          const normReticle = rawReticle ? normalizePlateText(rawReticle) : null;
+          if (normReticle) {
+            return {
+              ...normReticle,
+              rawText: rawReticle,
+              processedImageCrop: reticleAdapt.toDataURL('image/jpeg', 0.85)
             };
           }
         }
@@ -505,9 +513,12 @@ export function normalizePlateText(raw: string): {
 
   // Clean all noise except alphanumeric
   const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (clean.length < 4) return null;
+  if (clean.length < 5) return null;
 
-  // 1. Guinea-Bissau Match: GB + 3-4 digits + 1-2 letters
+  // Reject on-screen display timestamp / camera text (e.g. "04-24-2020", "FRI", "CAMERA 01")
+  if (/CAMERA|FRI|MON|TUE|WED|THU|SAT|SUN/.test(clean)) return null;
+
+  // 1. Guinea-Bissau Match: GB + 3-4 digits + 1-2 letters (e.g. GB-2345-AF, GB-123-AF)
   let gbCandidate = clean;
   if (/^(GB|G8|6B|68|CB|QB)/.test(gbCandidate)) {
     gbCandidate = 'GB' + gbCandidate.substring(2);
@@ -519,18 +530,19 @@ export function normalizePlateText(raw: string): {
     const rawDigits = gbMatch[1];
     const rawLetters = gbMatch[2];
 
-    // Letter suffix must NOT contain unconvertible digits (e.g. 3, 4, 6, 7, 9)
-    if (!/[34679]/.test(rawLetters)) {
+    // Suffix must NOT contain digits that cannot be letters (i.e., reject 3, 4, 6, 7, 9)
+    // and if suffix was a pure digit like '4', reject it
+    if (!/[34679]/.test(rawLetters) && !/^\d+$/.test(rawLetters)) {
       return {
         plateNumber: `GB-${correctDigits(rawDigits)}-${correctLetters(rawLetters)}`,
-        confidence: 94,
+        confidence: 96,
         country: 'GW',
         countryLabel: '🇬🇼 Guinée-Bissau'
       };
     }
   }
 
-  // 2. Senegal Cross-Border Match: DK (Dakar), ZG (Ziguinchor Casamance), KD (Kolda), TH, KL
+  // 2. Senegal Cross-Border Match: DK (Dakar), ZG (Ziguinchor Casamance), KD (Kolda), TH, KL, SL
   let snPrefix: string | null = null;
   let snRemainder = clean;
 
@@ -555,11 +567,10 @@ export function normalizePlateText(raw: string): {
       const rawDigits = snMatch[1];
       const rawLetters = snMatch[2];
 
-      // Suffix must be alphabetical (no unconvertible digits like 3, 4, 6, 7, 9)
-      if (!/[34679]/.test(rawLetters)) {
+      if (!/[34679]/.test(rawLetters) && !/^\d+$/.test(rawLetters)) {
         return {
           plateNumber: `${snPrefix}-${correctDigits(rawDigits)}-${correctLetters(rawLetters)}`,
-          confidence: 93,
+          confidence: 95,
           country: 'SN',
           countryLabel: '🇸🇳 Sénégal'
         };
@@ -567,7 +578,7 @@ export function normalizePlateText(raw: string): {
     }
   }
 
-  // 3. International / European import format: 2 letters - 3 digits - 2 letters (e.g. AB-093-FB, AB-864-HM)
+  // 3. International / European import format: 2 letters - 3 digits - 2 letters (e.g. AA-331-CM, AB-093-FB)
   // Tolerates single euro-band letter prefix (F, L, D...) and trailing region digits (75, 13...)
   const intlRegex = /^(?:[A-Z]{1})?([A-Z0-9]{2})([0-9OIZSBLAEGT]{3})([A-Z0-9]{2})(?:[0-9]{2})?$/;
   const intlMatch = clean.match(intlRegex);
@@ -576,28 +587,27 @@ export function normalizePlateText(raw: string): {
     const rawDigits = intlMatch[2];
     const rawSuffix = intlMatch[3];
 
-    // Suffix and prefix must be letters (avoid non-letter digits like 3, 4, 6, 7, 9)
-    if (!/[34679]/.test(rawPrefix) && !/[34679]/.test(rawSuffix)) {
+    // Suffix and prefix must not be pure digits or contain 3, 4, 6, 7, 9
+    if (!/[34679]/.test(rawPrefix) && !/[34679]/.test(rawSuffix) && !/^\d+$/.test(rawPrefix) && !/^\d+$/.test(rawSuffix)) {
       return {
         plateNumber: `${correctLetters(rawPrefix)}-${correctDigits(rawDigits)}-${correctLetters(rawSuffix)}`,
-        confidence: 94,
+        confidence: 96,
         country: 'UNKNOWN',
         countryLabel: '🌐 Transit / Import'
       };
     }
   }
 
-  // 4. Unprefixed plate format: 3-4 digits + 1-2 letters (Defaults to Guinea-Bissau for AREZKI BISSAU plaza)
-  const genericMatch = clean.match(/^([0-9OIZSBLAEGT]{3,4})([A-Z0-9]{1,2})$/);
-  if (genericMatch) {
-    const rawDigits = genericMatch[1];
-    const rawLetters = genericMatch[2];
-
-    // Must be letters only in suffix (no unconvertible digits like 4, 3, 7, 6, 9)
-    if (!/[34679]/.test(rawLetters)) {
+  // 4. Unprefixed Guinea-Bissau: strictly 4 digits + 2 letters (e.g. 4512 AZ -> GB-4512-AZ)
+  // Rejects 3-digit noise (e.g. 471NN)
+  const genMatch = clean.match(/^([0-9OIZSBLAEGT]{4})([A-Z0-9]{2})$/);
+  if (genMatch) {
+    const rawDigits = genMatch[1];
+    const rawLetters = genMatch[2];
+    if (!/[34679]/.test(rawLetters) && !/^\d+$/.test(rawLetters)) {
       return {
         plateNumber: `GB-${correctDigits(rawDigits)}-${correctLetters(rawLetters)}`,
-        confidence: 88,
+        confidence: 90,
         country: 'GW',
         countryLabel: '🇬🇼 Guinée-Bissau'
       };

@@ -25,8 +25,8 @@ export function createTollRouter(
   // 1. Simuler détection véhicule + ANPR + classification + ticket
   router.post('/detect', authMiddleware, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const { laneId, plate, category } = req.body;
-      const result = await detectUseCase.execute(laneId || 'CAISSE-01', plate, category);
+      const { laneId, plate, category, vehicleImageUrl } = req.body;
+      const result = await detectUseCase.execute(laneId || 'CAISSE-01', plate, category, vehicleImageUrl);
       res.json(result);
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -164,9 +164,29 @@ export function createTollRouter(
 
       console.log(`[CAMERA LAPI] 🎥 Détection reçue pour ${parsed.laneId}: Plaque ${parsed.plateNumber} (${parsed.vehicleType} -> ${parsed.categoryCode}, conf: ${parsed.confidence}%, IP caméra: ${lastSeenCameraIp || 'auto'})`);
 
-      const result = await detectUseCase.execute(parsed.laneId, parsed.plateNumber, parsed.categoryCode);
-      if (parsed.vehicleImageUrl) {
-        result.vehicleImageUrl = parsed.vehicleImageUrl;
+      let vehicleImg = parsed.vehicleImageUrl;
+      if (!vehicleImg) {
+        try {
+          const http = await import('http');
+          const snapBuf = await new Promise<Buffer | null>((resolve) => {
+            const snapReq = http.get('http://127.0.0.1:1984/api/frame.jpeg?src=hikvision', (snapRes) => {
+              if (snapRes.statusCode !== 200) return resolve(null);
+              const chunks: any[] = [];
+              snapRes.on('data', d => chunks.push(d));
+              snapRes.on('end', () => resolve(Buffer.concat(chunks)));
+            });
+            snapReq.on('error', () => resolve(null));
+            snapReq.setTimeout(800, () => { snapReq.destroy(); resolve(null); });
+          });
+          if (snapBuf && snapBuf.length > 500) {
+            vehicleImg = `data:image/jpeg;base64,${snapBuf.toString('base64')}`;
+          }
+        } catch (_) {}
+      }
+
+      const result = await detectUseCase.execute(parsed.laneId, parsed.plateNumber, parsed.categoryCode, vehicleImg);
+      if (vehicleImg) {
+        result.vehicleImageUrl = vehicleImg;
       }
       result.confidence = parsed.confidence;
 

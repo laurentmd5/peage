@@ -41,7 +41,12 @@ export class DetectVehicleUseCase {
 
   constructor(private readonly tariffRepo: ITariffRepository) {}
 
-  async execute(laneId: string = 'CAISSE-01', forcedPlate?: string, forcedCategory?: string): Promise<DetectVehicleResponseDTO> {
+  async execute(
+    laneId: string = 'CAISSE-01',
+    forcedPlate?: string,
+    forcedCategory?: string,
+    vehicleImageUrl?: string
+  ): Promise<DetectVehicleResponseDTO> {
     const rawPlate = forcedPlate || DetectVehicleUseCase.DEMO_PLATES[Math.floor(Math.random() * DetectVehicleUseCase.DEMO_PLATES.length)];
     const confidence = Math.floor(85 + Math.random() * 15); // 85% to 99%
     const plate = new PlateNumber(rawPlate, confidence);
@@ -82,7 +87,7 @@ export class DetectVehicleUseCase {
       ticketNumber: ticket.ticketNumber,
       qrCodeData: ticket.qrCodeData,
       detectedAt: new Date(),
-      vehicleImageUrl: DetectVehicleUseCase.VEHICLE_IMAGES[selectedCat.code] || DetectVehicleUseCase.VEHICLE_IMAGES.VL
+      vehicleImageUrl: vehicleImageUrl || DetectVehicleUseCase.VEHICLE_IMAGES[selectedCat.code] || DetectVehicleUseCase.VEHICLE_IMAGES.VL
     };
   }
 }

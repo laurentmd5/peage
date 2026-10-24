@@ -9,7 +9,7 @@ services:
     container_name: peage_system
     restart: always
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     environment:
       - PORT=3001
       - NODE_ENV=production

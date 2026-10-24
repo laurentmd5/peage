@@ -15,7 +15,7 @@ describe('Bilingual PDF Receipt and Report Generation Unit Tests', () => {
     changeReturned: 500,
     paymentMethod: 'ESPECES',
     cashierId: 'u-caisse1',
-    cashierName: 'Awa Diop',
+    cashierName: 'Caissier 1',
     status: 'COMPLETED',
     createdAt: new Date().toISOString(),
     qrCodeData: 'PEAGE-DK-1234-AA-500'
@@ -25,7 +25,7 @@ describe('Bilingual PDF Receipt and Report Generation Unit Tests', () => {
     id: 'cs-001',
     boothId: 'CAISSE-01',
     cashierId: 'u-caisse1',
-    cashierName: 'Awa Diop',
+    cashierName: 'Caissier 1',
     openedAt: new Date().toISOString(),
     initialFloat: 20000,
     totalCollected: 15000,

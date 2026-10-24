@@ -26,8 +26,8 @@ export async function seedDatabase(
 
   const admin = new User('u-admin', 'admin', pwAdmin, UserRole.ADMIN, 'Administrateur');
   const superv = new User('u-super', 'superviseur', pwSuper, UserRole.SUPERVISEUR, 'Superviseur Principal');
-  const caisse1 = new User('u-caisse1', 'caissier1', pwCaisse, UserRole.CAISSIER, 'Awa Diop');
-  const caisse2 = new User('u-caisse2', 'caissier2', pwCaisse, UserRole.CAISSIER, 'Moussa Fall');
+  const caisse1 = new User('u-caisse1', 'caissier1', pwCaisse, UserRole.CAISSIER, 'Caissier 1');
+  const caisse2 = new User('u-caisse2', 'caissier2', pwCaisse, UserRole.CAISSIER, 'Caissier 2');
 
   await userRepo.save(admin);
   await userRepo.save(superv);

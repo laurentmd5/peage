@@ -98,13 +98,13 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => onSwitchUser('caissier1')}
             className={`px-2 py-1 rounded transition-colors ${currentUser?.username === 'caissier1' ? 'bg-emerald-600 text-white font-bold' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
           >
-            {language === 'fr' ? 'Caissier 1 (Awa)' : 'Cashier 1 (Awa)'}
+            {language === 'fr' ? 'Caissier 1' : 'Cashier 1'}
           </button>
           <button
             onClick={() => onSwitchUser('caissier2')}
             className={`px-2 py-1 rounded transition-colors ${currentUser?.username === 'caissier2' ? 'bg-emerald-600 text-white font-bold' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
           >
-            {language === 'fr' ? 'Caissier 2 (Moussa)' : 'Cashier 2 (Moussa)'}
+            {language === 'fr' ? 'Caissier 2' : 'Cashier 2'}
           </button>
 
           {currentUser && (

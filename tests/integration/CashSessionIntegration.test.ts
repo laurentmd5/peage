@@ -37,7 +37,7 @@ describe('Cash Session Management Integration Tests', () => {
     const closed = await sessionUseCases.closeSession(
       { sessionId: active!.id, realCashCounted: counted },
       'u-caisse1',
-      'Awa Diop'
+      'Caissier 1'
     );
 
     expect(closed.status).toBe('CLOSED');

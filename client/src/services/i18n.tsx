@@ -45,10 +45,10 @@ export const translations = {
   loginButton: { fr: 'SE CONNECTER', en: 'LOG IN' },
   quickProfiles: { fr: 'Accès rapide profils de démonstration :', en: '1-Click Demo Profiles:' },
   invalidCredentials: { fr: 'Identifiants incorrects', en: 'Invalid credentials' },
-  cashier1Sub: { fr: 'Awa Diop (Caisse)', en: 'Awa Diop (Booth)' },
+  cashier1Sub: { fr: 'Poste Caisse 1', en: 'Booth 1' },
   superviseurSub: { fr: 'Annulations & Audit', en: 'Cancellations & Audit' },
   adminSub: { fr: 'Tarifs & Rapports', en: 'Tariffs & Reports' },
-  cashier2Sub: { fr: 'Moussa Fall (Caisse)', en: 'Moussa Fall (Booth)' },
+  cashier2Sub: { fr: 'Poste Caisse 2', en: 'Booth 2' },
 
   // Poste de Caisse
   caisseStatusLabel: { fr: 'Poste de Caisse :', en: 'Toll Booth:' },

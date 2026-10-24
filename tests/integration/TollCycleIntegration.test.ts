@@ -61,7 +61,7 @@ describe('Toll Cycle End-to-End Domain Integration Tests', () => {
       amountPaid: 1000,
       paymentMethod: PaymentMethod.ESPECES,
       cashierId: 'u-caisse1',
-      cashierName: 'Awa Diop',
+      cashierName: 'Caissier 1',
       ticketNumber: detection.ticketNumber,
       qrCodeData: detection.qrCodeData
     });
@@ -95,7 +95,7 @@ describe('Toll Cycle End-to-End Domain Integration Tests', () => {
       amountPaid: 500,
       paymentMethod: PaymentMethod.WAVE,
       cashierId: 'u-caisse1',
-      cashierName: 'Awa Diop',
+      cashierName: 'Caissier 1',
       ticketNumber: detection.ticketNumber
     });
 
@@ -122,7 +122,7 @@ describe('Toll Cycle End-to-End Domain Integration Tests', () => {
       laneId: 'CAISSE-01',
       reason: 'Ambulance Samu en urgence vitale',
       userId: 'u-caisse1',
-      username: 'Awa Diop'
+      username: 'Caissier 1'
     });
 
     expect(result.success).toBe(true);

@@ -23,7 +23,7 @@ test.describe('Inspection Visuelle Complète de l\'Interface (Playwright)', () =
     await expect(page.locator('text=SYSTÈME DE PÉAGE AUTOMATISÉ')).toBeVisible();
     await page.screenshot({ path: path.join(screenshotsDir, '01_login_screen.png'), fullPage: true });
 
-    // Connexion en Caissier 1 (Awa Diop)
+    // Connexion en Caissier 1
     await page.locator('#btn-quick-caissier1').click();
     await expect(page.locator('text=AREZKI BISSAU').first()).toBeVisible();
 

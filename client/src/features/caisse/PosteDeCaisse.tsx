@@ -205,7 +205,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
         amountPaid: result.amountDue,
         paymentMethod: 'WAVE',
         cashierId: currentUser?.id || 'u-caisse1',
-        cashierName: currentUser?.fullName || 'Awa Diop',
+        cashierName: currentUser?.fullName || 'Caissier 1',
         ticketNumber: result.ticketNumber,
         qrCodeData: result.qrCodeData
       });
@@ -227,7 +227,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
           amountPaid: tx.amountPaid,
           changeReturned: tx.changeReturned,
           paymentMethod: tx.paymentMethod,
-          cashierName: currentUser?.fullName || 'Awa Diop',
+          cashierName: currentUser?.fullName || 'Caissier 1',
           timestamp: tx.createdAt,
           qrCodeData: tx.qrCodeData
         });

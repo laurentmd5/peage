@@ -83,7 +83,7 @@ export function createTollRouter(
   // 4. Détail d'une transaction
   router.get('/transactions/:id', authMiddleware, async (req, res) => {
     try {
-      const tx = await transactionRepo.findById(req.params.id);
+      const tx = await transactionRepo.findById(req.params.id as string);
       if (!tx) {
         res.status(404).json({ error: 'Transaction non trouvée' });
         return;
@@ -104,7 +104,7 @@ export function createTollRouter(
       }
 
       const result = await cancelUseCase.execute({
-        transactionId: req.params.id,
+        transactionId: req.params.id as string,
         reason,
         cancelledBy: req.user.fullName || req.user.username,
         userId: req.user.userId,
@@ -158,8 +158,8 @@ export function createTollRouter(
       const cleanIp = remote.replace(/^.*:/, '');
       if (cleanIp && cleanIp !== '1' && cleanIp !== '127.0.0.1') {
         lastSeenCameraIp = cleanIp;
-      } else if (parsed.cameraIp) {
-        lastSeenCameraIp = parsed.cameraIp;
+      } else if (parsed.ipAddress) {
+        lastSeenCameraIp = parsed.ipAddress;
       }
 
       console.log(`[CAMERA LAPI] 🎥 Détection reçue pour ${parsed.laneId}: Plaque ${parsed.plateNumber} (${parsed.vehicleType} -> ${parsed.categoryCode}, conf: ${parsed.confidence}%, IP caméra: ${lastSeenCameraIp || 'auto'})`);

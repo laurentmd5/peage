@@ -34,7 +34,11 @@ describe('Bilingual PDF Receipt and Report Generation Unit Tests', () => {
     discrepancy: 0,
     status: 'CLOSED',
     breakdown: {
-      ESPECES: { total: 15000, count: 10 }
+      ESPECES: { total: 15000, count: 10 },
+      WAVE: { total: 0, count: 0 },
+      ORANGE_MONEY: { total: 0, count: 0 },
+      CARTE: { total: 0, count: 0 },
+      RFID: { total: 0, count: 0 }
     }
   };
 

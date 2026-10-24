@@ -75,6 +75,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   const [cameraStatusMsg, setCameraStatusMsg] = useState<string | null>(null);
   const hikvisionImgRef = useRef<HTMLImageElement | null>(null);
   const [isScanningHikvision, setIsScanningHikvision] = useState(false);
+  const [isTestingHikvision, setIsTestingHikvision] = useState(false);
   const [hikvisionLiveDetection, setHikvisionLiveDetection] = useState<{
     plateNumber: string;
     countryLabel: string;

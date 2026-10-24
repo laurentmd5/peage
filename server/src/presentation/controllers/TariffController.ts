@@ -28,7 +28,7 @@ export function createTariffRouter(tariffUseCases: TariffUseCases): Router {
         const { newRate, reason } = req.body;
         const result = await tariffUseCases.updateRate(
           {
-            code: req.params.code,
+            code: req.params.code as string,
             newRate: Number(newRate),
             changedBy: req.user?.fullName || req.user?.username || 'Admin',
             reason
@@ -74,7 +74,7 @@ export function createTariffRouter(tariffUseCases: TariffUseCases): Router {
     async (req: AuthenticatedRequest, res: Response) => {
       try {
         const result = await tariffUseCases.toggleActive(
-          req.params.code,
+          req.params.code as string,
           req.user!.userId,
           req.user?.fullName || req.user?.username || 'Admin'
         );

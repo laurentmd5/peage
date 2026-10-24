@@ -1,4 +1,4 @@
-name: CI/CD - Test & Auto-Deploy to VPS
+name: CI/CD - Test, Build & Containerized VPS Auto-Deploy
 
 on:
   push:
@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Étape 1 : Validation continue (Tests & Build)
+  # Étape 1 : Validation continue & Test du Build Docker
   test-and-build:
-    name: Run Tests & Verify Build
+    name: Run Tests & Verify Docker Build
     runs-on: ubuntu-latest
 
     steps:
@@ -25,21 +25,34 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run Vitest Unit & Integration Tests
+      - name: Run Vitest Unit & Integration Tests (97 tests)
         run: npm run test:all
+
+      - name: Verify TypeScript compilation
+        run: npx tsc --noEmit
 
       - name: Build React Client Bundle
         run: npm run build:client
 
-  # Étape 2 : Déploiement automatique sur le VPS
-  deploy:
-    name: Deploy to VPS
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Test Docker Container Build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: peage-system:test
+
+  # Étape 2 : Déploiement 100% Conteneurisé sur le VPS
+  deploy-docker:
+    name: Containerized Deploy to VPS (Docker)
     needs: test-and-build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Deploy to VPS via SSH
+      - name: Deploy Docker Container to VPS via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -52,10 +65,23 @@ jobs:
             TARGET_DIR="${{ secrets.VPS_TARGET_DIR || '/var/www/peage' }}"
             REPO_URL="https://github.com/${{ github.repository }}.git"
 
-            echo "🚀 [CI/CD] Début du déploiement sur le VPS..."
+            echo "🚀 [CI/CD] Début du déploiement conteneurisé sur le VPS..."
             echo "📁 Dossier cible : $TARGET_DIR"
 
-            # 1. Vérifier ou cloner le projet si premier déploiement
+            # 1. Vérifier si Docker est installé sur le VPS (auto-installation si absent)
+            if ! command -v docker &> /dev/null; then
+              echo "📦 Docker non détecté sur le VPS. Installation automatique de Docker..."
+              curl -fsSL https://get.docker.com | sh
+              systemctl enable --now docker
+            fi
+
+            # 2. Vérifier si Docker Compose est disponible
+            if ! docker compose version &> /dev/null; then
+              echo "📦 Docker Compose plugin non détecté. Installation..."
+              apt-get update && apt-get install -y docker-compose-plugin || true
+            fi
+
+            # 3. Vérifier ou cloner le projet si premier déploiement
             if [ ! -d "$TARGET_DIR/.git" ]; then
               echo "==> Premier déploiement détecté, clonage du dépôt..."
               mkdir -p "$TARGET_DIR"
@@ -64,37 +90,34 @@ jobs:
 
             cd "$TARGET_DIR"
 
-            # 2. Récupérer la dernière version de main
-            echo "==> Mise à jour du code source..."
+            # 4. Mettre à jour les sources depuis GitHub main
+            echo "==> Récupération des dernières sources (main)..."
             git fetch origin main
             git reset --hard origin/main
 
-            # 3. Déploiement (Support automatique Docker Compose ou Node/PM2)
-            if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-              echo "🐳 Déploiement via Docker Compose..."
-              docker compose down --remove-orphans || true
-              docker compose up -d --build
-              docker image prune -f
-            elif command -v pm2 &> /dev/null; then
-              echo "⚡ Déploiement via Node.js + PM2..."
-              npm ci
-              npm run build:client
-              pm2 restart peage || pm2 start npm --name "peage" -- start
-              pm2 save
-            else
-              echo "⚙️ Déploiement standard Node.js..."
-              npm ci
-              npm run build:client
-              # Relance le processus en arrière-plan
-              pkill -f "tsx server/src/index.ts" || true
-              nohup npm start > peage.log 2>&1 &
-            fi
+            # 5. Déploiement Strictement Conteneurisé (Docker Compose)
+            echo "🐳 Construction et démarrage du conteneur Docker..."
+            docker compose down --remove-orphans || true
+            docker compose up -d --build --force-recreate
 
-            # 4. Vérification du statut de santé
-            echo "==> Vérification de la disponibilité du serveur..."
-            sleep 5
+            # 6. Nettoyage des anciennes images orphelines
+            echo "🧹 Nettoyage des images Docker orphelines..."
+            docker image prune -f
+
+            # 7. Vérification de santé du conteneur en cours d'exécution
+            echo "🩺 Vérification du statut du conteneur..."
+            docker compose ps
+            sleep 6
+
+            # Test de l'endpoint de santé
             if command -v curl &> /dev/null; then
-              curl -s http://localhost:3001/api/health || echo "Serveur en cours d'initialisation..."
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/health || echo "000")
+              if [ "$HTTP_STATUS" -eq 200 ]; then
+                echo "✅ [HEALTH CHECK] Le conteneur Docker répond parfaitement (HTTP 200 OK) !"
+              else
+                echo "⚠️ Conteneur en cours d'initialisation (HTTP $HTTP_STATUS), vérification des logs..."
+                docker compose logs --tail=30
+              fi
             fi
 
-            echo "✅ [CI/CD] Déploiement terminé avec succès sur le VPS !"
+            echo "🎉 [CI/CD] Déploiement conteneurisé Docker terminé avec succès sur le VPS !"

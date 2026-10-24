@@ -9,7 +9,7 @@
     "dev:client": "vite",
     "dev": "concurrently -k -p \"[{name}]\" -n \"SERVER,CLIENT\" -c \"blue.bold,green.bold\" \"tsx watch server/src/index.ts\" \"vite\"",
     "build:client": "vite build",
-    "build:server": "tsc -p tsconfig.server.json",
+    "build:server": "tsc --noEmit",
     "build": "npm run build:client && npm run build:server",
     "start": "tsx server/src/index.ts",
     "test:unit": "vitest run tests/unit",

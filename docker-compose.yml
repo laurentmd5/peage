@@ -5,10 +5,23 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: peage-system:latest
     container_name: peage_system
-    restart: unless-stopped
+    restart: always
     ports:
       - "3001:3001"
     environment:
       - PORT=3001
       - NODE_ENV=production
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/api/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - peage-network
+
+networks:
+  peage-network:
+    driver: bridge

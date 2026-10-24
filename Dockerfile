@@ -8,7 +8,7 @@ RUN apk add --no-cache libc6-compat
 
 # Install dependencies
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 # Copy all source files
 COPY . .
@@ -30,7 +30,7 @@ RUN apk add --no-cache curl libc6-compat
 
 # Copy package and install production dependencies only
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Copy built frontend, server code, and runtime configs
 COPY --from=builder /app/dist ./dist

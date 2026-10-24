@@ -23,6 +23,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV PATH="/app/node_modules/.bin:$PATH"
 
 # Install runtime utilities (curl for container healthcheck, libc6-compat for esbuild)
 RUN apk add --no-cache curl libc6-compat

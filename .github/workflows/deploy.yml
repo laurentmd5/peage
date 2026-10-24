@@ -119,10 +119,10 @@ jobs:
             done
 
             if [ "$APP_READY" -eq 1 ]; then
-              echo "✅ [HEALTH CHECK] Le conteneur Docker répond parfaitement (HTTP 200 OK) !"
+              echo "==> [SUCCES] Le conteneur Docker repond parfaitement (HTTP 200 OK) !"
+              echo "==> [CI/CD] Deploiement conteneurise Docker termine avec succes sur le VPS !"
             else
-              echo "⚠️ Le conteneur n'a pas répondu immédiatement sur 127.0.0.1:3001. Logs récents :"
-              docker compose logs --tail=40
+              echo "==> [ERREUR] Le conteneur ne repond pas. Affichage des logs Docker :"
+              docker compose logs --tail=50
+              exit 1
             fi
-
-            echo "🎉 [CI/CD] Déploiement conteneurisé Docker terminé avec succès sur le VPS !"

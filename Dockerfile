@@ -41,6 +41,6 @@ COPY --from=builder /app/tsconfig.json ./tsconfig.json
 EXPOSE 3001
 
 HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:3001/api/health || exit 1
+  CMD curl -f http://127.0.0.1:3001/api/health || exit 1
 
 CMD ["npm", "start"]

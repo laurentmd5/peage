@@ -41,9 +41,9 @@ async function bootstrap() {
   );
   console.log('==> Données de démonstration prêtes (utilisateurs, tarifs, 28 transactions, audit).');
 
-  app.listen(PORT, () => {
+  app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`[PÉAGE EXPRESS] Serveur démarré avec succès sur le port ${PORT}`);
-    console.log(`==> API disponible sur : http://localhost:${PORT}/api`);
+    console.log(`==> API disponible sur : http://127.0.0.1:${PORT}/api`);
   });
 }
 

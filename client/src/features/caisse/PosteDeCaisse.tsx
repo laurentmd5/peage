@@ -368,8 +368,13 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       if (!isPlateManuallyEdited) {
         setWebcamPlateInput(liveDetection.plateNumberSuggestion);
       }
+    } else if (liveDetection && !isPlateManuallyEdited && !webcamPlateInput) {
+      // Auto-suggest default plate for vehicles without front plates (e.g. Category 1 Motorcycles)
+      if (liveDetection.categoryCode === 'CAT1' && liveDetection.fallbackPlate) {
+        setWebcamPlateInput(liveDetection.fallbackPlate);
+      }
     }
-  }, [liveDetection?.isOcrLiveRead, liveDetection?.plateNumberSuggestion, isPlateManuallyEdited]);
+  }, [liveDetection?.isOcrLiveRead, liveDetection?.plateNumberSuggestion, liveDetection?.categoryCode, liveDetection?.fallbackPlate, isPlateManuallyEdited, webcamPlateInput]);
 
   const handleUnlockPlate = () => {
     aiVisionService.unlockPlate();

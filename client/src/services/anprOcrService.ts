@@ -228,6 +228,41 @@ class AnprOcrService {
       }
 
       outCtx.putImageData(outImg, margin, margin);
+
+      // Despeckle / Despike filter: remove thin 1px/2px vertical noise lines (spokes, screen scanlines)
+      // Characters on license plates at targetH>=55 have stroke widths of >= 4 pixels.
+      // This permanently prevents Tesseract Leptonica WASM "Image too small to scale!! (1x36 vs min width of 3)" errors.
+      const cleanedImg = outCtx.getImageData(0, 0, outCanvas.width, outCanvas.height);
+      const cData = cleanedImg.data;
+      const cW = outCanvas.width;
+      const cH = outCanvas.height;
+
+      for (let y = margin; y < cH - margin; y++) {
+        for (let x = margin; x < cW - margin; x++) {
+          const idx = (y * cW + x) * 4;
+          if (cData[idx] === 0) {
+            const leftIsWhite = cData[idx - 4] === 255;
+            const rightIsWhite = cData[idx + 4] === 255;
+            // Remove isolated 1px width vertical artifact
+            if (leftIsWhite && rightIsWhite) {
+              cData[idx] = 255;
+              cData[idx + 1] = 255;
+              cData[idx + 2] = 255;
+            } else if (leftIsWhite && x < cW - margin - 1 && cData[idx + 4] === 0 && cData[idx + 8] === 255) {
+              // Remove isolated 2px width vertical artifact
+              cData[idx] = 255;
+              cData[idx + 1] = 255;
+              cData[idx + 2] = 255;
+              cData[idx + 4] = 255;
+              cData[idx + 5] = 255;
+              cData[idx + 6] = 255;
+              x++;
+            }
+          }
+        }
+      }
+      outCtx.putImageData(cleanedImg, 0, 0);
+
       return outCanvas;
     }
 
@@ -279,6 +314,37 @@ class AnprOcrService {
     }
 
     outCtx.putImageData(outImg, margin, margin);
+
+    // Despeckle / Despike filter: remove thin 1px/2px vertical noise lines for Otsu mode as well
+    const cleanedImgOtsu = outCtx.getImageData(0, 0, outCanvas.width, outCanvas.height);
+    const coData = cleanedImgOtsu.data;
+    const coW = outCanvas.width;
+    const coH = outCanvas.height;
+
+    for (let y = margin; y < coH - margin; y++) {
+      for (let x = margin; x < coW - margin; x++) {
+        const idx = (y * coW + x) * 4;
+        if (coData[idx] === 0) {
+          const leftIsWhite = coData[idx - 4] === 255;
+          const rightIsWhite = coData[idx + 4] === 255;
+          if (leftIsWhite && rightIsWhite) {
+            coData[idx] = 255;
+            coData[idx + 1] = 255;
+            coData[idx + 2] = 255;
+          } else if (leftIsWhite && x < coW - margin - 1 && coData[idx + 4] === 0 && coData[idx + 8] === 255) {
+            coData[idx] = 255;
+            coData[idx + 1] = 255;
+            coData[idx + 2] = 255;
+            coData[idx + 4] = 255;
+            coData[idx + 5] = 255;
+            coData[idx + 6] = 255;
+            x++;
+          }
+        }
+      }
+    }
+    outCtx.putImageData(cleanedImgOtsu, 0, 0);
+
     return outCanvas;
   }
 

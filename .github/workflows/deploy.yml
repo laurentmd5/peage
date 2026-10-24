@@ -68,20 +68,19 @@ jobs:
             echo "🚀 [CI/CD] Début du déploiement conteneurisé sur le VPS..."
             echo "📁 Dossier cible : $TARGET_DIR"
 
-            # 1. Vérifier si Docker est installé sur le VPS (auto-installation si absent)
+            # 1. Vérifier l'accès à Docker pour l'utilisateur de déploiement
             if ! command -v docker &> /dev/null; then
-              echo "📦 Docker non détecté sur le VPS. Installation automatique de Docker..."
-              curl -fsSL https://get.docker.com | sh
-              systemctl enable --now docker
+              echo "❌ [ERREUR] La commande 'docker' n'est pas trouvée pour l'utilisateur $USER."
+              echo "Assurez-vous que Docker est installé et que l'utilisateur est dans le groupe docker (sudo usermod -aG docker $USER)."
+              exit 1
             fi
 
-            # 2. Vérifier si Docker Compose est disponible
             if ! docker compose version &> /dev/null; then
-              echo "📦 Docker Compose plugin non détecté. Installation..."
-              apt-get update && apt-get install -y docker-compose-plugin || true
+              echo "❌ [ERREUR] 'docker compose' n'est pas accessible."
+              exit 1
             fi
 
-            # 3. Vérifier ou cloner le projet si premier déploiement
+            # 2. Vérifier ou cloner le projet si premier déploiement
             if [ ! -d "$TARGET_DIR/.git" ]; then
               echo "==> Premier déploiement détecté, clonage du dépôt..."
               mkdir -p "$TARGET_DIR"

@@ -75,6 +75,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   const [cameraStatusMsg, setCameraStatusMsg] = useState<string | null>(null);
   const hikvisionImgRef = useRef<HTMLImageElement | null>(null);
   const [isScanningHikvision, setIsScanningHikvision] = useState(false);
+  const [isCapturingFlash, setIsCapturingFlash] = useState(false);
   const [isTestingHikvision, setIsTestingHikvision] = useState(false);
   const [hikvisionLiveDetection, setHikvisionLiveDetection] = useState<{
     plateNumber: string;
@@ -442,10 +443,20 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   }, [cameraIp]);
 
   // Automated & On-Demand AI OCR scanning on Hikvision Live Stream
-  const scanHikvisionFrame = async (immediateConfirm = false) => {
-    if (!hikvisionImgRef.current || step !== 'WAITING' || isScanningHikvision) return;
+  const scanHikvisionFrame = async (immediateConfirm = false, forceFreshCapture = false) => {
+    if (!hikvisionImgRef.current || step !== 'WAITING') return;
+    if (isScanningHikvision && !forceFreshCapture) return;
+
     try {
       setIsScanningHikvision(true);
+      if (forceFreshCapture) {
+        setIsCapturingFlash(true);
+        setTimeout(() => setIsCapturingFlash(false), 600);
+        aiVisionService.reset();
+        setHikvisionPlateInput('');
+        setIsHikvisionPlateEdited(false);
+      }
+
       const img = hikvisionImgRef.current;
       if (!img.naturalWidth || !img.naturalHeight) return;
 
@@ -456,17 +467,29 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       if (!ctx) return;
       ctx.drawImage(img, 0, 0);
 
+      // Take a high-resolution snapshot at this exact millisecond
+      const snapshotUrl = canvas.toDataURL('image/jpeg', 0.92);
+
       // Run AI Vision for vehicle category detection on camera frame
       const aiResult = await aiVisionService.detectFromCanvas(canvas);
 
-      // Candidate area for OCR: target the central/lower portion where license plates sit
-      const rx = aiResult ? Math.max(0, Math.round(aiResult.bbox[0] + aiResult.bbox[2] * 0.10)) : Math.round(canvas.width * 0.15);
-      const ry = aiResult ? Math.max(0, Math.round(aiResult.bbox[1] + aiResult.bbox[3] * 0.25)) : Math.round(canvas.height * 0.25);
-      const rw = aiResult ? Math.min(canvas.width - rx, Math.round(aiResult.bbox[2] * 0.80)) : Math.round(canvas.width * 0.70);
-      const rh = aiResult ? Math.min(canvas.height - ry, Math.round(aiResult.bbox[3] * 0.55)) : Math.round(canvas.height * 0.45);
+      // Candidate 1: Targeted optical reticle zone (central 70% width, central 45% height)
+      const reticleX = Math.round(canvas.width * 0.15);
+      const reticleY = Math.round(canvas.height * 0.25);
+      const reticleW = Math.round(canvas.width * 0.70);
+      const reticleH = Math.round(canvas.height * 0.50);
 
-      const ocrResult = await anprOcrService.recognizePlate(canvas, [rx, ry, rw, rh]);
-      const snapshotUrl = canvas.toDataURL('image/jpeg', 0.88);
+      // Candidate 2: Vehicle bounding box bumper zone if detected
+      const rx = aiResult ? Math.max(0, Math.round(aiResult.bbox[0] + aiResult.bbox[2] * 0.10)) : reticleX;
+      const ry = aiResult ? Math.max(0, Math.round(aiResult.bbox[1] + aiResult.bbox[3] * 0.25)) : reticleY;
+      const rw = aiResult ? Math.min(canvas.width - rx, Math.round(aiResult.bbox[2] * 0.80)) : reticleW;
+      const rh = aiResult ? Math.min(canvas.height - ry, Math.round(aiResult.bbox[3] * 0.55)) : reticleH;
+
+      let ocrResult = await anprOcrService.recognizePlate(canvas, [rx, ry, rw, rh]);
+      // If candidate 2 didn't yield a plate and differed from reticle, also test optical reticle
+      if (!ocrResult?.plateNumber && (rx !== reticleX || ry !== reticleY)) {
+        ocrResult = await anprOcrService.recognizePlate(canvas, [reticleX, reticleY, reticleW, reticleH]);
+      }
 
       const detectedPlate = ocrResult?.plateNumber || (aiResult?.isOcrLiveRead && aiResult.plateNumberSuggestion ? aiResult.plateNumberSuggestion : '');
       const categoryCode = aiResult?.categoryCode || 'CAT2';
@@ -496,11 +519,13 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
         if (finalPlate && immediateConfirm) {
           await handleConfirmHikvisionDetection(finalPlate, snapshotUrl, categoryCode);
         } else if (finalPlate) {
-          setCameraStatusMsg(`✅ Cible LAPI : ${finalPlate} [${categoryCode} - ${formatCurrency(tariff)} FCFA]`);
+          setCameraStatusMsg(`✅ Plaque capturée avec succès : ${finalPlate} [${categoryCode} - ${formatCurrency(tariff)} FCFA]`);
+        } else if (forceFreshCapture) {
+          setCameraStatusMsg(`📸 Photo prise ! Plaque non reconnue sur cette prise. Centrer la plaque dans le viseur vert et recliquer.`);
         } else {
           setCameraStatusMsg(`🚗 Véhicule détecté [${categoryCode}] - Cadrez la plaque dans le viseur pour lecture...`);
         }
-      } else if (immediateConfirm) {
+      } else if (forceFreshCapture || immediateConfirm) {
         setCameraStatusMsg(
           language === 'fr'
             ? '⚠️ Aucune plaque lisible détectée dans le viseur. Vérifiez le cadrage ou saisissez-la directement.'
@@ -1149,7 +1174,9 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                     )}
 
                     {/* Camera Live Preview & Optical Targeting */}
-                    <div className="relative rounded-xl overflow-hidden border border-blue-500/40 bg-black aspect-video flex items-center justify-center shadow-inner group">
+                    <div className={`relative rounded-xl overflow-hidden border bg-black aspect-video flex items-center justify-center shadow-inner group transition-all duration-300 ${
+                      isCapturingFlash ? 'border-amber-400 ring-4 ring-amber-400/60 shadow-[0_0_35px_rgba(251,191,36,0.6)]' : 'border-blue-500/40'
+                    }`}>
                       {/* Live Continuous Video Stream from Real Hikvision ANPR Camera */}
                       <img
                         ref={hikvisionImgRef}
@@ -1164,6 +1191,16 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         }}
                         className="w-full h-full object-cover"
                       />
+
+                      {/* Instant Capture Visual Flash Effect */}
+                      {isCapturingFlash && (
+                        <div className="absolute inset-0 bg-white/20 backdrop-blur-[1px] flex items-center justify-center z-20 pointer-events-none animate-in fade-in">
+                          <div className="bg-slate-950/95 text-amber-300 border border-amber-400 px-4 py-2 rounded-xl text-xs font-mono font-bold flex items-center gap-2 shadow-2xl">
+                            <Camera className="w-4 h-4 text-amber-400 animate-spin" />
+                            <span>📸 Prise de vue instantanée & analyse OCR...</span>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Scanning Line Animation (like Webcam) */}
                       <div className="absolute inset-x-0 h-0.5 bg-blue-400 shadow-[0_0_8px_#60a5fa] animate-[bounce_2s_infinite] pointer-events-none"></div>
@@ -1250,14 +1287,14 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                               />
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setHikvisionLiveDetection(null);
-                                  setHikvisionPlateInput('');
-                                  setIsHikvisionPlateEdited(false);
-                                }}
-                                className="text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer"
+                                id="btn-recapture-hikvision"
+                                onClick={() => scanHikvisionFrame(false, true)}
+                                disabled={isScanningHikvision}
+                                title={language === 'fr' ? 'Prendre une photo instantanée et relire la plaque' : 'Take instant snap and re-read plate'}
+                                className="text-xs px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold border border-blue-400 shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all hover:scale-105"
                               >
-                                🔄 Relire
+                                <Camera className="w-3.5 h-3.5" />
+                                <span>{language === 'fr' ? '📸 Capturer & Relire' : '📸 Snap & Read'}</span>
                               </button>
                             </div>
                           </div>
@@ -1291,12 +1328,12 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         <button
                           type="button"
                           id="btn-scan-hikvision-now"
-                          onClick={() => scanHikvisionFrame(true)}
+                          onClick={() => scanHikvisionFrame(false, true)}
                           disabled={isScanningHikvision}
-                          className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md hover:scale-105 transition-all cursor-pointer"
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md hover:scale-105 transition-all cursor-pointer disabled:opacity-50"
                         >
-                          <Zap className="w-3.5 h-3.5 text-slate-950 fill-slate-950" />
-                          <span>{language === 'fr' ? '⚡ Détecter la Plaque' : '⚡ Detect Plate'}</span>
+                          <Camera className="w-3.5 h-3.5 text-slate-950" />
+                          <span>{language === 'fr' ? '📸 Capturer & Détecter' : '📸 Snap & Detect'}</span>
                         </button>
 
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">

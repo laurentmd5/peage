@@ -525,7 +525,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       const tariff = aiResult?.tariff || (hikvisionLiveDetection?.tariff || 500);
       const confidence = Math.max(ocrConfidence, aiResult?.confidence || 85);
 
-      if (aiResult || detectedPlate || forceFreshCapture) {
+      if (aiResult || detectedPlate) {
         const finalPlate = detectedPlate || (hikvisionPlateInput || hikvisionLiveDetection?.plateNumber || '');
         console.log('[ANPR OCR + AI] 🎯 Détection LAPI:', finalPlate || '(attente lecture plaque)', categoryCode, categoryLabel, tariff);
 
@@ -548,10 +548,16 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
         } else if (finalPlate) {
           setCameraStatusMsg(`✅ Cible LAPI prête : ${finalPlate} [${categoryCode} - ${formatCurrency(tariff)} FCFA]`);
         } else if (forceFreshCapture) {
-          setCameraStatusMsg(`📸 Photo prise [${categoryCode}] ! Plaque non reconnue sur cette prise. Centrer la plaque et recliquer.`);
+          setCameraStatusMsg(`📸 Véhicule [${categoryCode}] capturé ! Plaque non lue sur cette prise — centrez la plaque et recliquez.`);
         } else {
           setCameraStatusMsg(`🚗 Véhicule détecté [${categoryCode} - ${formatCurrency(tariff)} FCFA] - Alignez la plaque pour lecture...`);
         }
+      } else if (forceFreshCapture) {
+        setHikvisionLiveDetection(null);
+        setCameraStatusMsg('📸 Aucun véhicule ni plaque détecté devant la caméra. Présentez un véhicule sur la voie.');
+      } else if (!hikvisionPlateInput && !isHikvisionPlateEdited) {
+        setHikvisionLiveDetection(null);
+        setCameraStatusMsg(null);
       }
     } catch (e) {
       console.warn('OCR/AI error on Hikvision frame:', e);

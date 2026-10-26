@@ -128,7 +128,9 @@ export function classifyTruckSilhouette(aspectRatio: number, boxWidth: number, f
 class AIVisionService {
   private model: any = null;
   private isModelLoading = false;
+  private loadPromise: Promise<boolean> | null = null;
   private modelLoadError: string | null = null;
+  private emptyFramesCount = 0;
 
   // Real-time Edge ANPR / LAPI OCR state
   private isOcrBusy = false;
@@ -171,6 +173,7 @@ class AIVisionService {
     this.lockedPlate = null;
     this.ocrRollingBuffer = [];
     this.isOcrBusy = false;
+    this.emptyFramesCount = 0;
   }
 
   /**
@@ -244,35 +247,41 @@ class AIVisionService {
    */
   async loadModel(): Promise<boolean> {
     if (this.model) return true;
-    if (this.isModelLoading) return false;
+    if (this.loadPromise) return this.loadPromise;
 
     this.isModelLoading = true;
     this.modelLoadError = null;
 
-    try {
-      // 1. Ensure tfjs is loaded
-      if (!(window as any).tf) {
-        await this.loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js');
+    this.loadPromise = (async () => {
+      try {
+        // 1. Ensure tfjs is loaded
+        if (!(window as any).tf) {
+          await this.loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js');
+        }
+
+        // 2. Ensure coco-ssd is loaded
+        if (!(window as any).cocoSsd) {
+          await this.loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
+        }
+
+        // 3. Initialize model
+        this.model = await (window as any).cocoSsd.load({
+          base: 'lite_mobilenet_v2' // Fast lightweight edge model for real-time video
+        });
+
+        this.isModelLoading = false;
+        this.loadPromise = null;
+        return true;
+      } catch (err: any) {
+        console.warn('AI Vision CDN Model could not be loaded, using fallback heuristic edge detector:', err);
+        this.modelLoadError = err.message || 'CDN Load Error';
+        this.isModelLoading = false;
+        this.loadPromise = null;
+        return false;
       }
+    })();
 
-      // 2. Ensure coco-ssd is loaded
-      if (!(window as any).cocoSsd) {
-        await this.loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
-      }
-
-      // 3. Initialize model
-      this.model = await (window as any).cocoSsd.load({
-        base: 'lite_mobilenet_v2' // Fast lightweight edge model for real-time video
-      });
-
-      this.isModelLoading = false;
-      return true;
-    } catch (err: any) {
-      console.warn('AI Vision CDN Model could not be loaded, using fallback heuristic edge detector:', err);
-      this.modelLoadError = err.message || 'CDN Load Error';
-      this.isModelLoading = false;
-      return false;
-    }
+    return this.loadPromise;
   }
 
   private loadScript(src: string): Promise<void> {
@@ -420,9 +429,10 @@ class AIVisionService {
       const predictions = await this.model.detect(canvas);
       
       const vehicleClasses = ['car', 'truck', 'bus', 'motorcycle', 'bicycle'];
-      const vehiclePreds = predictions.filter((p: any) => vehicleClasses.includes(p.class) && p.score > 0.40);
+      const vehiclePreds = predictions.filter((p: any) => vehicleClasses.includes(p.class) && p.score >= 0.48);
 
       if (vehiclePreds.length > 0) {
+        this.emptyFramesCount = 0;
         vehiclePreds.sort((a: any, b: any) => b.score - a.score);
         let best = vehiclePreds[0];
         // Prevent close-up car grilles from being misclassified as low-confidence 'bus' or 'truck' (< 68%)
@@ -474,6 +484,17 @@ class AIVisionService {
       ];
       this.triggerBackgroundOcr(canvas, defaultSafeReticle);
       const activePlate = this.getEffectivePlate();
+
+      if (!activePlate) {
+        this.emptyFramesCount++;
+        // If no vehicle and no plate have been seen for 2 consecutive frames, release stale un-plated vehicle lock
+        if (this.emptyFramesCount >= 2) {
+          this.lockedVehicleSnapshot = null;
+          this.lockedVehicleCategory = null;
+        }
+      } else {
+        this.emptyFramesCount = 0;
+      }
 
       if (this.lockedVehicleCategory || activePlate) {
         const cat = this.lockedVehicleCategory || {
@@ -586,6 +607,15 @@ class AIVisionService {
       this.triggerBackgroundOcr(videoEl);
 
       const activePlate = this.getEffectivePlate();
+      if (!activePlate) {
+        this.emptyFramesCount++;
+        if (this.emptyFramesCount >= 2) {
+          this.lockedVehicleSnapshot = null;
+          this.lockedVehicleCategory = null;
+        }
+      } else {
+        this.emptyFramesCount = 0;
+      }
 
       // If we already have a locked vehicle category or an active plate read, maintain passage state:
       if (this.lockedVehicleCategory || activePlate) {
@@ -803,12 +833,26 @@ class AIVisionService {
   }
 
   /**
-   * Heuristic fallback if offline without CDN access
+   * Heuristic fallback if offline without CDN access:
+   * Triggers background OCR and only returns a detection if a real license plate or locked vehicle exists.
+   * Never fabricates a false-positive vehicle on an empty lane or room.
    */
-  private heuristicFallbackDetection(source: HTMLVideoElement | HTMLCanvasElement, liveSnapshot?: string): VehicleDetectionResult {
+  private heuristicFallbackDetection(source: HTMLVideoElement | HTMLCanvasElement, liveSnapshot?: string): VehicleDetectionResult | null {
     const w = 'videoWidth' in source ? (source.videoWidth || 640) : (source.width || 640);
     const h = 'videoHeight' in source ? (source.videoHeight || 480) : (source.height || 480);
-    const bbox: [number, number, number, number] = [w * 0.15, h * 0.2, w * 0.7, h * 0.6];
+    const bbox: [number, number, number, number] = [
+      Math.round(w * 0.10),
+      Math.round(h * 0.14),
+      Math.round(w * 0.80),
+      Math.round(h * 0.72)
+    ];
+
+    this.triggerBackgroundOcr(source, bbox);
+    const activePlate = this.getEffectivePlate();
+
+    if (!activePlate && !this.lockedVehicleCategory) {
+      return null;
+    }
 
     let snap = liveSnapshot;
     if (!snap) {
@@ -820,17 +864,11 @@ class AIVisionService {
       snap = canvas.toDataURL('image/jpeg', 0.8);
     }
 
-    if (!this.lockedVehicleSnapshot) {
-      this.lockedVehicleSnapshot = snap;
-    }
-
-    const activePlate = this.getEffectivePlate();
-
     return {
       categoryCode: this.lockedVehicleCategory?.categoryCode || 'CAT2',
       categoryLabel: this.lockedVehicleCategory?.categoryLabel || 'Catégorie 2 (Voitures & Pick-up double cabine)',
       tariff: this.lockedVehicleCategory?.tariff || 500,
-      confidence: 88,
+      confidence: activePlate?.confidence || this.lockedVehicleCategory?.confidence || 90,
       detectedObject: 'car',
       bbox,
       snapshotDataUrl: this.lockedVehicleSnapshot || snap,

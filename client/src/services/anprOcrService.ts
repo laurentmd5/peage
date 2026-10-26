@@ -51,8 +51,9 @@ class AnprOcrService {
 
   /**
    * 2D Integral-Image White-Plate + Black-Character Island Detector
-   * Locates the compact license plate rectangle (e.g. AA-112-AA) anywhere inside (rx, ry, rw, rh)
-   * Ignores dark grilles/rings (low white ratio) and blank white walls (zero character edges)
+   * Locates the compact license plate rectangle (e.g. AA-112-AA) anywhere inside (rx, ry, rw, rh),
+   * expands/trims horizontally to the exact white plate island (excluding [F] and [Q5/75] dark bands),
+   * and computes the vertical perspective shear slope (autoShearY) from character edge centroids.
    */
   findPlateSubcrop(
     sourceCanvas: HTMLCanvasElement,
@@ -60,25 +61,28 @@ class AnprOcrService {
     ry: number,
     rw: number,
     rh: number
-  ): { x: number; y: number; w: number; h: number } {
-    if (rw < 60 || rh < 20) return { x: rx, y: ry, w: rw, h: rh };
+  ): { x: number; y: number; w: number; h: number; autoShearY?: number } {
+    // If already a tight standalone plate crop (e.g. 400x100 synthetic canvas), do not subcrop vertically
+    if (rw < 60 || rh < 140) return { x: rx, y: ry, w: rw, h: rh, autoShearY: 0 };
 
     try {
       const c = document.createElement('canvas');
       c.width = rw;
       c.height = rh;
       const ctx = c.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return { x: rx, y: ry, w: rw, h: rh };
+      if (!ctx) return { x: rx, y: ry, w: rw, h: rh, autoShearY: 0 };
       ctx.drawImage(sourceCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
       const data = ctx.getImageData(0, 0, rw, rh).data;
 
       // Build 2D Integral Images for:
-      // 1) Neutral bright plate pixels (intWhite)
+      // 1) Neutral or cool-tinted (LCD/daylight) bright plate pixels (intWhite)
       // 2) Sharp dark-character-to-white-plate horizontal transitions (intEdge)
       const stride = rw + 1;
       const intWhite = new Int32Array((rh + 1) * stride);
       const intEdge = new Int32Array((rh + 1) * stride);
-      const lumRow = new Uint8Array(rw);
+      const isWhitePx = new Uint8Array(rw * rh);
+      const isEdgePx = new Uint8Array(rw * rh);
+      const lumPx = new Uint8Array(rw * rh);
 
       for (let y = 0; y < rh; y++) {
         let rowW = 0;
@@ -92,23 +96,32 @@ class AnprOcrService {
           const g = data[idx + 1];
           const b = data[idx + 2];
           const lum = (r * 77 + g * 150 + b * 29) >> 8;
-          lumRow[x] = lum;
+          lumPx[y * rw + x] = lum;
 
           const maxC = Math.max(r, g, b);
           const minC = Math.min(r, g, b);
-          const isWhitePlateBg = lum > 125 && (maxC - minC) < 50 ? 1 : 0;
+          // Accept neutral white ((maxC - minC) < 65) OR cool-white LED/LCD monitor/daylight tint (b >= g >= r with (maxC - minC) < 105)
+          const isNeutralOrCoolWhite =
+            maxC - minC < 65 || (b >= g - 5 && g >= r - 10 && maxC - minC < 105);
+          const isWhitePlateBg = lum > 122 && isNeutralOrCoolWhite ? 1 : 0;
+          isWhitePx[y * rw + x] = isWhitePlateBg;
 
+          // Only count character edges where at least one side is a bright plate background pixel (ignores white-on-black [Q5/75] badges)
           let isCharStrokeEdge = 0;
-          if (x >= 2) {
-            const prevL = lumRow[x - 2];
-            const diff = Math.abs(lum - prevL);
-            const minL = Math.min(lum, prevL);
-            const maxL = Math.max(lum, prevL);
-            // Direct horizontal transition between dark character stroke (< 108) and bright plate (> 120)
-            if (diff > 34 && minL < 108 && maxL > 120) {
-              isCharStrokeEdge = 1;
+          if (x >= 3) {
+            const p2 = y * rw + (x - 2);
+            const p3 = y * rw + (x - 3);
+            const hasWhiteSide =
+              isWhitePlateBg === 1 || isWhitePx[p2] === 1 || isWhitePx[p3] === 1;
+            if (hasWhiteSide) {
+              const minL = Math.min(lum, lumPx[p2], lumPx[p3]);
+              const maxL = Math.max(lum, lumPx[p2], lumPx[p3]);
+              if (maxL - minL > 36 && minL < 115 && maxL > 122) {
+                isCharStrokeEdge = 1;
+              }
             }
           }
+          isEdgePx[y * rw + x] = isCharStrokeEdge;
 
           rowW += isWhitePlateBg;
           rowE += isCharStrokeEdge;
@@ -129,38 +142,43 @@ class AnprOcrService {
       // Multi-scale 2D sliding window search for the white-plate + black-characters island
       const xMinSearch = Math.round(rw * 0.14);
       const xMaxSearch = Math.round(rw * 0.88);
-      const yMinSearch = Math.round(rh * 0.06);
+      const yMinSearch = Math.round(rh * 0.10);
       const yMaxSearch = Math.round(rh * 0.94);
 
-      const widthFractions = [0.18, 0.25, 0.35, 0.48];
-      const aspectRatios = [2.6, 3.4];
+      const widthFractions = [0.15, 0.22, 0.30, 0.40];
+      const aspectRatios = [1.8, 2.5, 3.3];
 
       let bestScore = 0;
       let bestBox: { x: number; y: number; w: number; h: number } | null = null;
 
       for (const wf of widthFractions) {
-        const ww = Math.max(64, Math.round(rw * wf));
+        const ww = Math.max(60, Math.round(rw * wf));
         for (const ar of aspectRatios) {
           const wh = Math.max(22, Math.round(ww / ar));
-          if (wh > rh * 0.45) continue;
+          if (wh > rh * 0.48) continue;
 
-          const stepX = Math.max(6, Math.round(ww * 0.12));
-          const stepY = Math.max(4, Math.round(wh * 0.15));
+          const stepX = Math.max(4, Math.round(ww * 0.08));
+          const stepY = Math.max(4, Math.round(wh * 0.12));
           const area = ww * wh;
 
           for (let wy = yMinSearch; wy + wh <= yMaxSearch; wy += stepY) {
             for (let wx = xMinSearch; wx + ww <= xMaxSearch; wx += stepX) {
               const whiteCount = rectSum(intWhite, wx, wy, wx + ww, wy + wh);
               const whiteRatio = whiteCount / area;
-              // Must have substantial white plate background (26%..86%), rejecting dark grilles (<26%) and blank walls (>86%)
-              if (whiteRatio < 0.26 || whiteRatio > 0.86) continue;
+              // Must have substantial white plate background (32%..86%), rejecting dark grilles (<32%) and blank walls (>86%)
+              if (whiteRatio < 0.32 || whiteRatio > 0.86) continue;
 
               const edgeCount = rectSum(intEdge, wx, wy, wx + ww, wy + wh);
               const edgeRatio = edgeCount / area;
-              if (edgeRatio < 0.032) continue;
+              if (edgeRatio < 0.045) continue;
 
-              // Normalize density score so compact tight windows around AA-112-AA beat oversized windows
-              const score = (edgeRatio * 100) * Math.min(1.0, whiteRatio * 1.8) * Math.pow(area, 0.15);
+              // Require character edges in both left half and right half of the window
+              const midX = wx + (ww >> 1);
+              const leftEdges = rectSum(intEdge, wx, wy, midX, wy + wh);
+              const rightEdges = rectSum(intEdge, midX, wy, wx + ww, wy + wh);
+              if (leftEdges < edgeCount * 0.22 || rightEdges < edgeCount * 0.22) continue;
+
+              const score = (edgeRatio * 100) * Math.min(1.0, whiteRatio * 1.6) * Math.pow(area, 0.15);
               if (score > bestScore) {
                 bestScore = score;
                 bestBox = { x: wx, y: wy, w: ww, h: wh };
@@ -171,13 +189,80 @@ class AnprOcrService {
       }
 
       if (bestBox) {
-        const padX = Math.round(bestBox.w * 0.12);
-        const padY = Math.round(bestBox.h * 0.25);
-        const px = Math.max(0, bestBox.x - padX);
-        const py = Math.max(0, bestBox.y - padY);
-        const pw = Math.min(rw - px, bestBox.w + padX * 2);
-        const ph = Math.min(rh - py, bestBox.h + padY * 2);
-        return { x: rx + px, y: ry + py, w: pw, h: ph };
+        // Expand/trim horizontally [leftX .. rightX] to match the contiguous white plate background
+        const sliceW = Math.max(5, Math.round(bestBox.w * 0.05));
+        const yTop = Math.max(0, bestBox.y - Math.round(bestBox.h * 0.35));
+        const yBot = Math.min(rh, bestBox.y + bestBox.h + Math.round(bestBox.h * 0.35));
+        const bandH = Math.max(1, yBot - yTop);
+
+        let leftX = bestBox.x;
+        while (leftX - sliceW >= 0) {
+          const wSum = rectSum(intWhite, leftX - sliceW, yTop, leftX, yBot);
+          if (wSum / (sliceW * bandH) < 0.18) break;
+          leftX -= sliceW;
+        }
+        while (leftX + sliceW < bestBox.x + bestBox.w * 0.35) {
+          const wSum = rectSum(intWhite, leftX, yTop, leftX + sliceW, yBot);
+          if (wSum / (sliceW * bandH) >= 0.20) break;
+          leftX += sliceW;
+        }
+
+        let rightX = bestBox.x + bestBox.w;
+        while (rightX + sliceW <= rw) {
+          const wSum = rectSum(intWhite, rightX, yTop, rightX + sliceW, yBot);
+          if (wSum / (sliceW * bandH) < 0.18) break;
+          rightX += sliceW;
+        }
+        while (rightX - sliceW > bestBox.x + bestBox.w * 0.65) {
+          const wSum = rectSum(intWhite, rightX - sliceW, yTop, rightX, yBot);
+          if (wSum / (sliceW * bandH) >= 0.20) break;
+          rightX -= sliceW;
+        }
+
+        const plateW = Math.max(48, rightX - leftX);
+        const midX = leftX + (plateW >> 1);
+        const searchY1 = Math.max(0, bestBox.y - Math.round(bestBox.h * 0.45));
+        const searchY2 = Math.min(rh, bestBox.y + bestBox.h + Math.round(bestBox.h * 0.45));
+
+        let leftYSum = 0;
+        let leftXSum = 0;
+        let leftCnt = 0;
+        let rightYSum = 0;
+        let rightXSum = 0;
+        let rightCnt = 0;
+
+        for (let y = searchY1; y < searchY2; y++) {
+          for (let x = leftX + Math.round(plateW * 0.06); x < rightX - Math.round(plateW * 0.06); x++) {
+            if (isEdgePx[y * rw + x]) {
+              if (x < midX) {
+                leftYSum += y;
+                leftXSum += x;
+                leftCnt++;
+              } else {
+                rightYSum += y;
+                rightXSum += x;
+                rightCnt++;
+              }
+            }
+          }
+        }
+
+        const meanLeftY = leftCnt > 0 ? leftYSum / leftCnt : bestBox.y + bestBox.h / 2;
+        const meanRightY = rightCnt > 0 ? rightYSum / rightCnt : bestBox.y + bestBox.h / 2;
+        const meanLeftX = leftCnt > 0 ? leftXSum / leftCnt : leftX + plateW * 0.25;
+        const meanRightX = rightCnt > 0 ? rightXSum / rightCnt : leftX + plateW * 0.75;
+        const dxCenters = Math.max(10, meanRightX - meanLeftX);
+
+        const autoShearY = (meanLeftY - meanRightY) / dxCenters;
+        const centerY = Math.round((meanLeftY + meanRightY) / 2);
+        const perpPlateH = Math.max(Math.round(bestBox.h * 1.25), Math.round(plateW * 0.36));
+
+        const padX = Math.round(plateW * 0.06);
+        const px = Math.max(0, leftX - padX);
+        const py = Math.max(0, centerY - Math.round(perpPlateH / 2));
+        const pw = Math.min(rw - px, plateW + padX * 2);
+        const ph = Math.min(rh - py, perpPlateH);
+        return { x: rx + px, y: ry + py, w: pw, h: ph, autoShearY };
       }
     } catch {
       // Fallback on error
@@ -188,17 +273,20 @@ class AnprOcrService {
         x: rx + Math.round(rw * 0.20),
         y: ry + Math.round(rh * 0.25),
         w: Math.round(rw * 0.60),
-        h: Math.round(rh * 0.50)
+        h: Math.round(rh * 0.50),
+        autoShearY: 0
       };
     }
 
-    return { x: rx, y: ry, w: rw, h: rh };
+    return { x: rx, y: ry, w: rw, h: rh, autoShearY: 0 };
   }
 
   /**
    * Preprocess candidate license plate region
-   * Supports 'adaptive' (Bradley local window for webcams with overexposure/dark grills)
-   * and 'otsu' (high contrast global threshold for clean synthetic/standalone plates)
+   * Supports:
+   * - 'grayscale' (Affine shear deskew + canonical 4.4:1 rectification + 3x3 Unsharp Mask + side-border cut)
+   * - 'adaptive' (Bradley local window thresholding)
+   * - 'otsu' (Global Otsu thresholding)
    */
   preprocessPlateImage(
     sourceCanvas: HTMLCanvasElement,
@@ -206,12 +294,11 @@ class AnprOcrService {
     cropY: number,
     cropW: number,
     cropH: number,
-    mode: 'adaptive' | 'otsu' = 'adaptive',
-    tiltDeg = 0
+    mode: 'adaptive' | 'otsu' | 'grayscale' = 'adaptive',
+    shearOrTilt = 0
   ): HTMLCanvasElement {
-    const scale = Math.max(1.8, Math.min(3.5, 320 / Math.max(1, cropW)));
-    const targetW = Math.max(220, Math.round(cropW * scale));
-    const targetH = Math.max(55, Math.round(cropH * scale));
+    const targetW = 300;
+    const targetH = 68;
 
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = targetW;
@@ -223,35 +310,41 @@ class AnprOcrService {
     tCtx.fillRect(0, 0, targetW, targetH);
     tCtx.imageSmoothingEnabled = true;
     tCtx.imageSmoothingQuality = 'high';
-    if (tiltDeg !== 0) {
-      tCtx.save();
-      tCtx.translate(targetW / 2, targetH / 2);
-      tCtx.rotate((tiltDeg * Math.PI) / 180);
-      tCtx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, -targetW / 2, -targetH / 2, targetW, targetH);
-      tCtx.restore();
-    } else {
-      tCtx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+
+    // Sample directly from sourceCanvas using affine parallelogram mapping so tilted corners are never clipped
+    const srcCenterX = cropX + cropW / 2;
+    const srcCenterY = cropY + cropH / 2;
+    const scaleX = targetW / Math.max(1, cropW);
+    const scaleY = targetH / Math.max(1, cropH);
+
+    tCtx.save();
+    tCtx.translate(targetW / 2, targetH / 2);
+    if (Math.abs(shearOrTilt) > 0.015 && Math.abs(shearOrTilt) <= 1.2) {
+      // Affine vertical shear (levels tilted 3/4 plate baselines while keeping vertical character stems upright)
+      tCtx.transform(1, shearOrTilt * (scaleY / scaleX), 0, 1, 0, 0);
+    } else if (Math.abs(shearOrTilt) > 1.2) {
+      // Standard 2D rotation in degrees
+      tCtx.rotate((shearOrTilt * Math.PI) / 180);
     }
+    tCtx.scale(scaleX, scaleY);
+    tCtx.drawImage(sourceCanvas, -srcCenterX, -srcCenterY);
+    tCtx.restore();
 
     const imgData = tCtx.getImageData(0, 0, targetW, targetH);
     const data = imgData.data;
     const total = targetW * targetH;
     const gray = new Uint8ClampedArray(total);
 
+    let minG = 255;
+    let maxG = 0;
     for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      // Suppress European blue euro-bands ([F] on left, [75] on right) so they become clean white margin
-      // instead of a black vertical block merging with the first or last character
-      if (b > r + 18 && b > g + 8 && r < 120) {
-        gray[i / 4] = 255;
-      } else {
-        gray[i / 4] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-      }
+      const gVal = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      gray[i / 4] = gVal;
+      if (gVal < minG) minG = gVal;
+      if (gVal > maxG) maxG = gVal;
     }
 
-    const margin = 16;
+    const margin = 18;
     const outCanvas = document.createElement('canvas');
     outCanvas.width = targetW + margin * 2;
     outCanvas.height = targetH + margin * 2;
@@ -263,8 +356,70 @@ class AnprOcrService {
     const outImg = outCtx.getImageData(margin, margin, targetW, targetH);
     const outData = outImg.data;
 
+    if (mode === 'grayscale') {
+      const gRange = Math.max(1, maxG - minG);
+      const stretched = new Uint8ClampedArray(total);
+      for (let i = 0; i < total; i++) {
+        stretched[i] = Math.round(((gray[i] - minG) / gRange) * 255);
+      }
+      // 3x3 Unsharp Mask (Laplacian sharpening) to restore crisp strokes on upscaled camera crops
+      for (let y = 0; y < targetH; y++) {
+        for (let x = 0; x < targetW; x++) {
+          const i = y * targetW + x;
+          let norm = stretched[i];
+          if (x > 0 && x < targetW - 1 && y > 0 && y < targetH - 1) {
+            const lap =
+              5 * stretched[i] -
+              (stretched[i - 1] + stretched[i + 1] + stretched[i - targetW] + stretched[i + targetW]);
+            norm = Math.max(0, Math.min(255, Math.round(0.35 * stretched[i] + 0.65 * lap)));
+          }
+          const idx = i * 4;
+          outData[idx] = norm;
+          outData[idx + 1] = norm;
+          outData[idx + 2] = norm;
+          outData[idx + 3] = 255;
+        }
+      }
+
+      const sideW = Math.round(targetW * 0.11);
+      let leftCut = -1;
+      for (let x = 0; x < sideW; x++) {
+        let colSum = 0;
+        for (let y = 0; y < targetH; y++) colSum += outData[(y * targetW + x) * 4];
+        if (colSum / targetH < 210) leftCut = x;
+      }
+      if (leftCut >= 0) {
+        for (let x = 0; x <= leftCut; x++) {
+          for (let y = 0; y < targetH; y++) {
+            const idx = (y * targetW + x) * 4;
+            outData[idx] = 255;
+            outData[idx + 1] = 255;
+            outData[idx + 2] = 255;
+          }
+        }
+      }
+      let rightCut = targetW;
+      for (let x = targetW - 1; x >= targetW - sideW; x--) {
+        let colSum = 0;
+        for (let y = 0; y < targetH; y++) colSum += outData[(y * targetW + x) * 4];
+        if (colSum / targetH < 210) rightCut = x;
+      }
+      if (rightCut < targetW) {
+        for (let x = rightCut; x < targetW; x++) {
+          for (let y = 0; y < targetH; y++) {
+            const idx = (y * targetW + x) * 4;
+            outData[idx] = 255;
+            outData[idx + 1] = 255;
+            outData[idx + 2] = 255;
+          }
+        }
+      }
+
+      outCtx.putImageData(outImg, margin, margin);
+      return outCanvas;
+    }
+
     if (mode === 'adaptive') {
-      // 1. Integral Image Calculation
       const intImg = new Float64Array((targetW + 1) * (targetH + 1));
       for (let y = 0; y < targetH; y++) {
         let sum = 0;
@@ -274,8 +429,8 @@ class AnprOcrService {
         }
       }
 
-      const S = Math.round(targetW / 18);
-      const T = 0.12;
+      const S = Math.round(targetW / 10);
+      const T = 0.14;
 
       for (let y = 0; y < targetH; y++) {
         for (let x = 0; x < targetW; x++) {
@@ -301,15 +456,15 @@ class AnprOcrService {
         }
       }
 
-      // Suppress dark vertical side-borders (Euroband or dark car grille on left/right 14% of plate crop)
-      const sideEdgeW = Math.round(targetW * 0.14);
+      // Suppress dark vertical side-borders (Euroband or dark car grille on left/right 11% of plate crop)
+      const sideEdgeW = Math.round(targetW * 0.11);
       for (let x = 0; x < targetW; x++) {
         if (x < sideEdgeW || x > targetW - sideEdgeW) {
           let darkCount = 0;
           for (let y = 0; y < targetH; y++) {
             if (outData[(y * targetW + x) * 4] === 0) darkCount++;
           }
-          if (darkCount > targetH * 0.55) {
+          if (darkCount > targetH * 0.42) {
             for (let y = 0; y < targetH; y++) {
               const idx = (y * targetW + x) * 4;
               outData[idx] = 255;
@@ -321,47 +476,6 @@ class AnprOcrService {
       }
 
       outCtx.putImageData(outImg, margin, margin);
-
-      // Despeckle / Despike filter: remove thin 1px/2px vertical/horizontal noise lines
-      const cleanedImg = outCtx.getImageData(0, 0, outCanvas.width, outCanvas.height);
-      const cData = cleanedImg.data;
-      const cW = outCanvas.width;
-      const cH = outCanvas.height;
-
-      for (let y = margin; y < cH - margin; y++) {
-        for (let x = margin; x < cW - margin; x++) {
-          const idx = (y * cW + x) * 4;
-          if (cData[idx] === 0) {
-            const leftIsWhite = cData[idx - 4] === 255;
-            const rightIsWhite = cData[idx + 4] === 255;
-            const topIsWhite = cData[idx - cW * 4] === 255;
-            const bottomIsWhite = cData[idx + cW * 4] === 255;
-
-            if ((leftIsWhite && rightIsWhite) || (topIsWhite && bottomIsWhite)) {
-              cData[idx] = 255;
-              cData[idx + 1] = 255;
-              cData[idx + 2] = 255;
-            } else if (leftIsWhite && x < cW - margin - 1 && cData[idx + 4] === 0 && cData[idx + 8] === 255) {
-              cData[idx] = 255;
-              cData[idx + 1] = 255;
-              cData[idx + 2] = 255;
-              cData[idx + 4] = 255;
-              cData[idx + 5] = 255;
-              cData[idx + 6] = 255;
-              x++;
-            } else if (topIsWhite && y < cH - margin - 1 && cData[idx + cW * 4] === 0 && cData[idx + cW * 8] === 255) {
-              cData[idx] = 255;
-              cData[idx + 1] = 255;
-              cData[idx + 2] = 255;
-              cData[idx + cW * 4] = 255;
-              cData[idx + cW * 4 + 1] = 255;
-              cData[idx + cW * 4 + 2] = 255;
-            }
-          }
-        }
-      }
-      outCtx.putImageData(cleanedImg, 0, 0);
-
       return outCanvas;
     }
 
@@ -533,23 +647,41 @@ class AnprOcrService {
         const cropH = bbox ? Math.min(maxSafeY - cropY, bbox[3]) : (maxSafeY - cropY);
 
         const plateCrop = this.findPlateSubcrop(srcCanvas, cropX, cropY, cropW, cropH);
+        const autoShear = plateCrop.autoShearY ?? 0;
 
-        // Pass 1: Adaptive binarization on targeted plate subcrop (0° horizontal)
-        const canvasAdapt = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'adaptive', 0);
-        const resAdapt = await this.worker.recognize(canvasAdapt);
-        const rawAdapt = resAdapt.data.text ? resAdapt.data.text.trim() : '';
-        const normAdapt = rawAdapt ? normalizePlateText(rawAdapt) : null;
-        if (normAdapt) {
+        // Pass 1: Contrast-stretched + Unsharp-masked Grayscale with auto-shear rectification
+        const canvasGray = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'grayscale', autoShear);
+        const resGray = await this.worker.recognize(canvasGray);
+        const rawGray = resGray.data.text ? resGray.data.text.trim() : '';
+        const normGray = rawGray ? normalizePlateText(rawGray) : null;
+        if (normGray) {
           return {
-            ...normAdapt,
-            rawText: rawAdapt,
-            processedImageCrop: canvasAdapt.toDataURL('image/jpeg', 0.85)
+            ...normGray,
+            rawText: rawGray,
+            processedImageCrop: canvasGray.toDataURL('image/jpeg', 0.85)
           };
         }
 
-        // Pass 2: Pre-binarization Perspective Deskew (+11°, +15°, -11°) for 3/4 angled toll lane cameras (like tilted AA-112-AA)
-        for (const tiltAngle of [11, 15, -11] as const) {
-          const deskewed = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'adaptive', tiltAngle);
+        // Pass 2: Adaptive binarization on targeted plate subcrop (with autoShear and 0°)
+        const shearCandidates = Math.abs(autoShear) > 0.04 ? [autoShear, 0] : [0];
+        let canvasAdapt = canvasGray;
+        for (const sh of shearCandidates) {
+          canvasAdapt = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'adaptive', sh);
+          const resAdapt = await this.worker.recognize(canvasAdapt);
+          const rawAdapt = resAdapt.data.text ? resAdapt.data.text.trim() : '';
+          const normAdapt = rawAdapt ? normalizePlateText(rawAdapt) : null;
+          if (normAdapt) {
+            return {
+              ...normAdapt,
+              rawText: rawAdapt,
+              processedImageCrop: canvasAdapt.toDataURL('image/jpeg', 0.85)
+            };
+          }
+        }
+
+        // Pass 3: Pre-binarization Perspective Shear/Deskew (+0.32, -0.25, +11°, -11°) for 3/4 angled toll lane cameras
+        for (const tiltOrShear of [0.32, -0.25, 11, -11] as const) {
+          const deskewed = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'grayscale', tiltOrShear);
           const resDeskew = await this.worker.recognize(deskewed);
           const rawDeskew = resDeskew.data.text ? resDeskew.data.text.trim() : '';
           const normDeskew = rawDeskew ? normalizePlateText(rawDeskew) : null;
@@ -562,8 +694,8 @@ class AnprOcrService {
           }
         }
 
-        // Pass 3: Otsu binarization on targeted plate subcrop (0° and +11°)
-        for (const tiltAngle of [0, 11] as const) {
+        // Pass 4: Otsu binarization on targeted plate subcrop
+        for (const tiltAngle of [autoShear, 0] as const) {
           const canvasOtsu = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'otsu', tiltAngle);
           const resOtsu = await this.worker.recognize(canvasOtsu);
           const rawOtsu = resOtsu.data.text ? resOtsu.data.text.trim() : '';
@@ -577,14 +709,14 @@ class AnprOcrService {
           }
         }
 
-        // Pass 4: Multi-zone fallback (Upper-Mid Bumper & Lower-Mid Bumper) if plateCrop missed
+        // Pass 5: Multi-zone fallback (Upper-Mid Bumper & Lower-Mid Bumper) if plateCrop missed
         const zones = [
           { x: cropX + Math.round(cropW * 0.20), y: cropY + Math.round(cropH * 0.45), w: Math.round(cropW * 0.55), h: Math.round(cropH * 0.45) },
           { x: cropX + Math.round(cropW * 0.22), y: cropY + Math.round(cropH * 0.10), w: Math.round(cropW * 0.55), h: Math.round(cropH * 0.42) }
         ];
         for (const z of zones) {
           const zSub = this.findPlateSubcrop(srcCanvas, z.x, z.y, z.w, z.h);
-          const zAdapt = this.preprocessPlateImage(srcCanvas, zSub.x, zSub.y, zSub.w, zSub.h, 'adaptive', 11);
+          const zAdapt = this.preprocessPlateImage(srcCanvas, zSub.x, zSub.y, zSub.w, zSub.h, 'grayscale', zSub.autoShearY ?? 0.28);
           const resZ = await this.worker.recognize(zAdapt);
           const rawZ = resZ.data.text ? resZ.data.text.trim() : '';
           const normZ = rawZ ? normalizePlateText(rawZ) : null;
@@ -597,7 +729,7 @@ class AnprOcrService {
           }
         }
 
-        // Pass 5: Multi-Orientation Auto-Rotation (90° and 270°)
+        // Pass 6: Multi-Orientation Auto-Rotation (90° and 270°)
         for (const angle of [90, 270] as const) {
           const rotCanvas = this.rotateCanvas(canvasAdapt, angle);
           const resRot = await this.worker.recognize(rotCanvas);
@@ -624,18 +756,28 @@ class AnprOcrService {
       const reticleH = Math.round(height * 0.50);
 
       const plateCrop1 = this.findPlateSubcrop(srcCanvas, reticleX, reticleY, reticleW, reticleH);
+      const autoShear1 = plateCrop1.autoShearY ?? 0;
 
-      // Try Bradley Adaptive on Candidate 1
-      const adaptCanvas1 = this.preprocessPlateImage(srcCanvas, plateCrop1.x, plateCrop1.y, plateCrop1.w, plateCrop1.h, 'adaptive', 0);
-      let result = await this.worker.recognize(adaptCanvas1);
+      // Try Contrast-Stretched Grayscale on Candidate 1 first
+      const grayCanvas1 = this.preprocessPlateImage(srcCanvas, plateCrop1.x, plateCrop1.y, plateCrop1.w, plateCrop1.h, 'grayscale', autoShear1);
+      let result = await this.worker.recognize(grayCanvas1);
       let rawText = result.data.text ? result.data.text.trim() : '';
       let normalized = rawText ? normalizePlateText(rawText) : null;
-      let activeCanvas = adaptCanvas1;
+      let activeCanvas = grayCanvas1;
 
-      // Try Pre-binarization Deskew (+11° / -11°) on Candidate 1
+      // Try Bradley Adaptive on Candidate 1
+      const adaptCanvas1 = this.preprocessPlateImage(srcCanvas, plateCrop1.x, plateCrop1.y, plateCrop1.w, plateCrop1.h, 'adaptive', autoShear1);
       if (!normalized) {
-        for (const tiltAngle of [11, -11] as const) {
-          const deskewCanvas1 = this.preprocessPlateImage(srcCanvas, plateCrop1.x, plateCrop1.y, plateCrop1.w, plateCrop1.h, 'adaptive', tiltAngle);
+        result = await this.worker.recognize(adaptCanvas1);
+        rawText = result.data.text ? result.data.text.trim() : '';
+        normalized = rawText ? normalizePlateText(rawText) : null;
+        activeCanvas = adaptCanvas1;
+      }
+
+      // Try Pre-binarization Deskew (+0.32 / -0.25 / +11° / -11°) on Candidate 1
+      if (!normalized) {
+        for (const tiltOrShear of [0.32, -0.25, 11, -11] as const) {
+          const deskewCanvas1 = this.preprocessPlateImage(srcCanvas, plateCrop1.x, plateCrop1.y, plateCrop1.w, plateCrop1.h, 'grayscale', tiltOrShear);
           const resDeskew1 = await this.worker.recognize(deskewCanvas1);
           const rawDeskew1 = resDeskew1.data.text ? resDeskew1.data.text.trim() : '';
           const normDeskew1 = rawDeskew1 ? normalizePlateText(rawDeskew1) : null;
@@ -860,9 +1002,11 @@ function parseSinglePlateCandidate(clean: string): {
     ) {
       let cleanPref = correctLetters(rawPrefix);
       const cleanSuf = correctLetters(rawSuffix);
-      // If left Euroband [F] corrupted the first character of a symmetric SIV plate (e.g. BA-112-AA, IA-112-AA, FA-112-AA -> AA-112-AA)
-      if (/^[FBIS8I][A-Z]$/.test(cleanPref) && cleanPref[1] === cleanSuf[0] && cleanSuf[0] === cleanSuf[1]) {
+      // If left Euroband [F] or optical ligature corrupted the first/second character of a symmetric SIV plate (e.g. BA-112-AA, IA-112-AA, LA-112-AA, AL-112-AA -> AA-112-AA)
+      if (/^[FBIS8ILMW][A-Z]$/.test(cleanPref) && cleanPref[1] === cleanSuf[0] && cleanSuf[0] === cleanSuf[1]) {
         cleanPref = cleanPref[1] + cleanPref[1];
+      } else if (/^[A-Z][L1I]$/.test(cleanPref) && cleanPref[0] === cleanSuf[0] && cleanSuf[0] === cleanSuf[1]) {
+        cleanPref = cleanPref[0] + cleanPref[0];
       }
       return {
         plateNumber: `${cleanPref}-${correctDigits(rawDigits)}-${cleanSuf}`,
@@ -873,26 +1017,29 @@ function parseSinglePlateCandidate(clean: string): {
     }
   }
 
-  // 3b. SIV plate with left character clipped by Euroband (e.g. "A112AA", "I112AA", "B112AA", "1112AA", "8112AA" -> "AA-112-AA")
-  const clippedSivMatch = clean.match(/^(?:[FBI18])?([A-Z])?([0-9]{3})([A-Z]{2})(?:[0-9]{2})?$/);
+  // 3b. SIV plate with left character clipped by Euroband or merged into ligature M/W (e.g. "M-112-AA", "A112AA", "A-T12-AA", "I112AA", "B112AA", "1112AA", "8112AA" -> "AA-112-AA")
+  const clippedSivMatch = clean.match(/^(?:[FBI18MWL])?([A-Z])?([0-9OIZSBLT]{3})([A-Z]{2})(?:[0-9]{1,2})?$/);
   if (clippedSivMatch) {
     const leadLetter = clippedSivMatch[1];
-    const digits3 = clippedSivMatch[2];
+    const rawDigits3 = clippedSivMatch[2];
     const suffix2 = clippedSivMatch[3];
-    if (leadLetter && leadLetter === suffix2[0]) {
-      return {
-        plateNumber: `${leadLetter}${leadLetter}-${digits3}-${suffix2}`,
-        confidence: 94,
-        country: 'UNKNOWN',
-        countryLabel: '🌐 Transit / Import'
-      };
-    } else if (!leadLetter && suffix2[0] === suffix2[1]) {
-      return {
-        plateNumber: `${suffix2}-${digits3}-${suffix2}`,
-        confidence: 93,
-        country: 'UNKNOWN',
-        countryLabel: '🌐 Transit / Import'
-      };
+    if (countActualDigits(rawDigits3) >= 2) {
+      const digits3 = correctDigits(rawDigits3).replace(/T/g, '1');
+      if (leadLetter && leadLetter === suffix2[0]) {
+        return {
+          plateNumber: `${leadLetter}${leadLetter}-${digits3}-${suffix2}`,
+          confidence: 94,
+          country: 'UNKNOWN',
+          countryLabel: '🌐 Transit / Import'
+        };
+      } else if (!leadLetter && suffix2[0] === suffix2[1]) {
+        return {
+          plateNumber: `${suffix2}-${digits3}-${suffix2}`,
+          confidence: 93,
+          country: 'UNKNOWN',
+          countryLabel: '🌐 Transit / Import'
+        };
+      }
     }
   }
 

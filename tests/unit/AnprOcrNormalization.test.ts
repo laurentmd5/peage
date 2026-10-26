@@ -136,8 +136,11 @@ describe('ANPR / LAPI OCR Plate Normalization & Grammar Correction', () => {
       expect(res?.countryLabel).toBe('🌐 Transit / Import');
     });
 
-    it('should recover AA-112-AA when left Euroband clips or merges with first letter (A112AA, B112AA, I112AA, 1112AA, 8112AA)', () => {
+    it('should recover AA-112-AA when left Euroband clips or merges with first letter (A112AA, M-112-AA, A-T12-AA, LAL-112-AA, B112AA, I112AA, 1112AA, 8112AA)', () => {
       expect(normalizePlateText('A112AA')?.plateNumber).toBe('AA-112-AA');
+      expect(normalizePlateText('M-112-AA')?.plateNumber).toBe('AA-112-AA');
+      expect(normalizePlateText('A-T12-AA')?.plateNumber).toBe('AA-112-AA');
+      expect(normalizePlateText('LAL-112-AA 1')?.plateNumber).toBe('AA-112-AA');
       expect(normalizePlateText('B112AA')?.plateNumber).toBe('AA-112-AA');
       expect(normalizePlateText('I112AA')?.plateNumber).toBe('AA-112-AA');
       expect(normalizePlateText('1112AA')?.plateNumber).toBe('AA-112-AA');

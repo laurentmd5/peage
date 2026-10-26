@@ -296,7 +296,8 @@ export function createTollRouter(
           'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Connection': 'close',
-          'Pragma': 'no-cache'
+          'Pragma': 'no-cache',
+          'Access-Control-Allow-Origin': '*'
         });
         proxyRes.pipe(res);
       });
@@ -327,7 +328,8 @@ export function createTollRouter(
         res.writeHead(proxyRes.statusCode || 200, {
           'Content-Type': 'image/jpeg',
           'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
+          'Pragma': 'no-cache',
+          'Access-Control-Allow-Origin': '*'
         });
         proxyRes.pipe(res);
       });

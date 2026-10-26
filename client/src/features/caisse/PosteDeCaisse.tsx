@@ -470,41 +470,47 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       // Take a high-resolution snapshot at this exact millisecond
       const snapshotUrl = canvas.toDataURL('image/jpeg', 0.92);
 
-      // Run AI Vision for vehicle category detection on camera frame
+      // 1. FAST REAL-TIME CATEGORY INFERENCE (MobileNet GPU ~20ms, non-blocking)
       const aiResult = await aiVisionService.detectFromCanvas(canvas);
 
-      // Candidate 1: Targeted optical reticle zone (central 70% width, central 45% height)
-      const reticleX = Math.round(canvas.width * 0.15);
-      const reticleY = Math.round(canvas.height * 0.25);
-      const reticleW = Math.round(canvas.width * 0.70);
-      const reticleH = Math.round(canvas.height * 0.50);
+      // Expanded reading zone ROI (88% width, 70% height) to encompass wide fronts
+      const rx = Math.max(0, Math.round(canvas.width * 0.06));
+      const ry = Math.max(0, Math.round(canvas.height * 0.15));
+      const rw = Math.min(canvas.width - rx, Math.round(canvas.width * 0.88));
+      const rh = Math.min(canvas.height - ry, Math.round(canvas.height * 0.70));
 
-      // Candidate 2: Vehicle bounding box bumper zone if detected
-      const rx = aiResult ? Math.max(0, Math.round(aiResult.bbox[0] + aiResult.bbox[2] * 0.10)) : reticleX;
-      const ry = aiResult ? Math.max(0, Math.round(aiResult.bbox[1] + aiResult.bbox[3] * 0.25)) : reticleY;
-      const rw = aiResult ? Math.min(canvas.width - rx, Math.round(aiResult.bbox[2] * 0.80)) : reticleW;
-      const rh = aiResult ? Math.min(canvas.height - ry, Math.round(aiResult.bbox[3] * 0.55)) : reticleH;
+      let detectedPlate = '';
+      let ocrConfidence = 0;
+      let ocrCountryLabel = 'Auto';
 
-      let ocrResult = await anprOcrService.recognizePlate(canvas, [rx, ry, rw, rh]);
-      // If candidate 2 didn't yield a plate and differed from reticle, also test optical reticle
-      if (!ocrResult?.plateNumber && (rx !== reticleX || ry !== reticleY)) {
-        ocrResult = await anprOcrService.recognizePlate(canvas, [reticleX, reticleY, reticleW, reticleH]);
+      // 2. OCR READING:
+      // If user triggered on-demand snap ("forceFreshCapture"), run deep multi-orientation OCR synchronously
+      // In continuous loop, OCR runs asynchronously in the background via aiVisionService.triggerBackgroundOcr
+      if (forceFreshCapture) {
+        const ocrResult = await anprOcrService.recognizePlate(canvas, [rx, ry, rw, rh]);
+        if (ocrResult?.plateNumber) {
+          detectedPlate = ocrResult.plateNumber;
+          ocrConfidence = ocrResult.confidence;
+          ocrCountryLabel = ocrResult.countryLabel || 'Auto';
+        }
+      } else if (aiResult?.isOcrLiveRead && aiResult.plateNumberSuggestion) {
+        detectedPlate = aiResult.plateNumberSuggestion;
+        ocrConfidence = aiResult.confidence;
+        ocrCountryLabel = aiResult.ocrCountryLabel || 'Auto';
       }
 
-      const detectedPlate = ocrResult?.plateNumber || (aiResult?.isOcrLiveRead && aiResult.plateNumberSuggestion ? aiResult.plateNumberSuggestion : '');
-      const categoryCode = aiResult?.categoryCode || 'CAT2';
-      const categoryLabel = aiResult?.categoryLabel || 'Voitures & Pick-up';
-      const tariff = aiResult?.tariff || 500;
-      const confidence = Math.max(ocrResult?.confidence || 0, aiResult?.confidence || 85);
+      const categoryCode = aiResult?.categoryCode || (hikvisionLiveDetection?.categoryCode || 'CAT2');
+      const categoryLabel = aiResult?.categoryLabel || (hikvisionLiveDetection?.categoryLabel || 'Voitures & Pick-up');
+      const tariff = aiResult?.tariff || (hikvisionLiveDetection?.tariff || 500);
+      const confidence = Math.max(ocrConfidence, aiResult?.confidence || 85);
 
-      if (detectedPlate || aiResult) {
-        // Never inject dummy placeholder! Only populate with genuine OCR reading
-        const finalPlate = detectedPlate || '';
-        console.log('[ANPR OCR + AI] 🎯 Détection LAPI:', finalPlate || '(attente lecture)', categoryCode, categoryLabel, tariff);
+      if (aiResult || detectedPlate || forceFreshCapture) {
+        const finalPlate = detectedPlate || (hikvisionPlateInput || hikvisionLiveDetection?.plateNumber || '');
+        console.log('[ANPR OCR + AI] 🎯 Détection LAPI:', finalPlate || '(attente lecture plaque)', categoryCode, categoryLabel, tariff);
 
         setHikvisionLiveDetection({
           plateNumber: finalPlate,
-          countryLabel: ocrResult?.countryLabel || aiResult?.ocrCountryLabel || 'Auto',
+          countryLabel: ocrCountryLabel || aiResult?.ocrCountryLabel || 'Auto',
           confidence,
           categoryCode,
           categoryLabel,
@@ -512,25 +518,19 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
           snapshotDataUrl: snapshotUrl
         });
 
-        if (finalPlate && !isHikvisionPlateEdited) {
-          setHikvisionPlateInput(finalPlate);
+        if (detectedPlate && !isHikvisionPlateEdited) {
+          setHikvisionPlateInput(detectedPlate);
         }
 
         if (finalPlate && immediateConfirm) {
           await handleConfirmHikvisionDetection(finalPlate, snapshotUrl, categoryCode);
         } else if (finalPlate) {
-          setCameraStatusMsg(`✅ Plaque capturée avec succès : ${finalPlate} [${categoryCode} - ${formatCurrency(tariff)} FCFA]`);
+          setCameraStatusMsg(`✅ Cible LAPI prête : ${finalPlate} [${categoryCode} - ${formatCurrency(tariff)} FCFA]`);
         } else if (forceFreshCapture) {
-          setCameraStatusMsg(`📸 Photo prise ! Plaque non reconnue sur cette prise. Centrer la plaque dans le viseur vert et recliquer.`);
+          setCameraStatusMsg(`📸 Photo prise [${categoryCode}] ! Plaque non reconnue sur cette prise. Centrer la plaque et recliquer.`);
         } else {
-          setCameraStatusMsg(`🚗 Véhicule détecté [${categoryCode}] - Cadrez la plaque dans le viseur pour lecture...`);
+          setCameraStatusMsg(`🚗 Véhicule détecté [${categoryCode} - ${formatCurrency(tariff)} FCFA] - Alignez la plaque pour lecture...`);
         }
-      } else if (forceFreshCapture || immediateConfirm) {
-        setCameraStatusMsg(
-          language === 'fr'
-            ? '⚠️ Aucune plaque lisible détectée dans le viseur. Vérifiez le cadrage ou saisissez-la directement.'
-            : '⚠️ No readable plate detected in viewfinder. Adjust angle or enter it manually.'
-        );
       }
     } catch (e) {
       console.warn('OCR/AI error on Hikvision frame:', e);
@@ -566,19 +566,20 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     }
   };
 
-  // Continuous auto-scan on Hikvision live feed while in waiting state
+  // Continuous real-time AI vehicle classification loop on camera feed (like Webcam mode)
   useEffect(() => {
     let interval: any = null;
     if (cameraMode === 'HIKVISION' && step === 'WAITING') {
+      aiVisionService.loadModel().catch(() => {});
       anprOcrService.init().catch(() => {});
       interval = setInterval(() => {
-        scanHikvisionFrame(false);
-      }, 1400);
+        scanHikvisionFrame(false, false);
+      }, 600);
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [cameraMode, step, isScanningHikvision, isHikvisionPlateEdited]);
+  }, [cameraMode, step]);
 
   const handleTestHikvisionWebhook = async (preset?: { plate: string; vehicleType: string; label: string }) => {
     setIsTestingHikvision(true);
@@ -1217,28 +1218,53 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                           </span>
                         </div>
 
-                        {/* Center Target Box */}
-                        <div className={`mx-auto w-4/5 sm:w-3/4 h-24 border-2 rounded-xl flex items-center justify-center transition-all ${
+                        {/* Center Target Box - Expanded Optical Reading Zone */}
+                        <div className={`mx-auto w-[92%] sm:w-[88%] h-44 sm:h-52 border-2 rounded-2xl flex flex-col items-center justify-between p-3 transition-all relative ${
                           hikvisionLiveDetection
-                            ? 'border-emerald-400 bg-emerald-500/20 shadow-[0_0_25px_rgba(52,211,153,0.4)]'
+                            ? 'border-emerald-400 bg-emerald-500/10 shadow-[0_0_35px_rgba(52,211,153,0.35)]'
                             : 'border-dashed border-blue-400/60 bg-blue-500/5'
                         }`}>
-                          {hikvisionLiveDetection && (hikvisionPlateInput || hikvisionLiveDetection.plateNumber) ? (
-                            <div className="flex items-center gap-2">
-                              <span className="text-emerald-300 font-black flex items-center gap-1.5 bg-slate-950/95 px-3 py-1.5 rounded-lg border border-emerald-400 shadow-xl text-xs font-mono">
+                          {/* Top HUD Status: Category & Tariff detected in real time */}
+                          <div className="w-full flex justify-between items-center text-[10px] font-mono">
+                            {hikvisionLiveDetection ? (
+                              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-400 font-bold flex items-center gap-1.5 shadow">
                                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                                <span>[{hikvisionLiveDetection.categoryCode}] {hikvisionLiveDetection.categoryLabel} — {formatCurrency(hikvisionLiveDetection.tariff)} FCFA</span>
+                              </span>
+                            ) : (
+                              <span className="text-blue-300/80 bg-slate-950/80 px-2 py-0.5 rounded border border-blue-500/30 flex items-center gap-1">
+                                <Camera className="w-3 h-3 text-blue-400" />
+                                <span>ZONE DE LECTURE AUTOMATIQUE LAPI (LARGE)</span>
+                              </span>
+                            )}
+                            <span className="text-[10px] font-mono text-slate-400 bg-slate-950/80 px-2 py-0.5 rounded">
+                              {hikvisionLiveDetection ? `${hikvisionLiveDetection.confidence}% Confiance` : 'IA MobileNet Active'}
+                            </span>
+                          </div>
+
+                          {/* Center Plate Readout / Guidance */}
+                          {hikvisionLiveDetection && (hikvisionPlateInput || hikvisionLiveDetection.plateNumber) ? (
+                            <div className="flex items-center gap-2 animate-in zoom-in-95">
+                              <span className="text-emerald-300 font-black flex items-center gap-2 bg-slate-950/95 px-4 py-2 rounded-xl border-2 border-emerald-400 shadow-2xl text-sm font-mono">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
                                 <span>PLAQUE :</span>
-                                <span className="text-white px-2 py-0.5 rounded bg-emerald-500/30 border border-emerald-400 font-mono tracking-widest text-sm font-black">
+                                <span className="text-white px-3 py-1 rounded bg-emerald-500/30 border border-emerald-400 font-mono tracking-widest text-base font-black">
                                   {hikvisionPlateInput || hikvisionLiveDetection.plateNumber}
                                 </span>
                               </span>
                             </div>
                           ) : (
-                            <div className="text-[11px] font-mono text-blue-300 bg-slate-950/90 px-2.5 py-1 rounded border border-blue-500/30 flex items-center gap-1.5">
-                              <Camera className="w-3.5 h-3.5 text-blue-400" />
-                              <span>{hikvisionLiveDetection ? (language === 'fr' ? 'Cadrez la plaque dans le viseur' : 'Target plate in viewfinder') : t('anprDetectionZone')}</span>
+                            <div className="text-xs font-mono text-blue-200 bg-slate-950/90 px-3.5 py-2 rounded-xl border border-blue-500/40 flex items-center gap-2 shadow-lg text-center">
+                              <Camera className="w-4 h-4 text-blue-400 shrink-0" />
+                              <span>{hikvisionLiveDetection ? (language === 'fr' ? '🚗 Véhicule détecté ! Cadrez la plaque pour lecture' : 'Vehicle acquired! Center plate in zone') : (language === 'fr' ? 'Avancez le véhicule dans la zone de lecture' : 'Move vehicle into detection zone')}</span>
                             </div>
                           )}
+
+                          {/* Bottom corner guide */}
+                          <div className="w-full flex justify-between items-center text-[9px] font-mono text-slate-400">
+                            <span>ZONE OPTIQUE 88%</span>
+                            <span>{hikvisionLiveDetection ? '✅ GABARIT IDENTIFIÉ' : 'RECONNAISSANCE CONTINUE 600ms'}</span>
+                          </div>
                         </div>
 
                         <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">

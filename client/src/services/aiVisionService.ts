@@ -174,6 +174,13 @@ class AIVisionService {
   }
 
   /**
+   * Alias for resetOcr
+   */
+  reset(): void {
+    this.resetOcr();
+  }
+
+  /**
    * Unlocks the OCR plate reading to allow rescanning a different plate
    */
   unlockPlate(): void {

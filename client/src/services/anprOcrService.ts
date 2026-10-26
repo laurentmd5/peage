@@ -254,8 +254,11 @@ class AnprOcrService {
           if (cData[idx] === 0) {
             const leftIsWhite = cData[idx - 4] === 255;
             const rightIsWhite = cData[idx + 4] === 255;
-            // Remove isolated 1px width vertical artifact
-            if (leftIsWhite && rightIsWhite) {
+            const topIsWhite = cData[idx - cW * 4] === 255;
+            const bottomIsWhite = cData[idx + cW * 4] === 255;
+
+            // Remove isolated 1px width line in either horizontal OR vertical orientation
+            if ((leftIsWhite && rightIsWhite) || (topIsWhite && bottomIsWhite)) {
               cData[idx] = 255;
               cData[idx + 1] = 255;
               cData[idx + 2] = 255;
@@ -268,6 +271,14 @@ class AnprOcrService {
               cData[idx + 5] = 255;
               cData[idx + 6] = 255;
               x++;
+            } else if (topIsWhite && y < cH - margin - 1 && cData[idx + cW * 4] === 0 && cData[idx + cW * 8] === 255) {
+              // Remove isolated 2px height horizontal artifact
+              cData[idx] = 255;
+              cData[idx + 1] = 255;
+              cData[idx + 2] = 255;
+              cData[idx + cW * 4] = 255;
+              cData[idx + cW * 4 + 1] = 255;
+              cData[idx + cW * 4 + 2] = 255;
             }
           }
         }
@@ -338,7 +349,11 @@ class AnprOcrService {
         if (coData[idx] === 0) {
           const leftIsWhite = coData[idx - 4] === 255;
           const rightIsWhite = coData[idx + 4] === 255;
-          if (leftIsWhite && rightIsWhite) {
+          const topIsWhite = coData[idx - coW * 4] === 255;
+          const bottomIsWhite = coData[idx + coW * 4] === 255;
+
+          // Remove isolated 1px width line in either horizontal OR vertical orientation
+          if ((leftIsWhite && rightIsWhite) || (topIsWhite && bottomIsWhite)) {
             coData[idx] = 255;
             coData[idx + 1] = 255;
             coData[idx + 2] = 255;
@@ -350,6 +365,13 @@ class AnprOcrService {
             coData[idx + 5] = 255;
             coData[idx + 6] = 255;
             x++;
+          } else if (topIsWhite && y < coH - margin - 1 && coData[idx + coW * 4] === 0 && coData[idx + coW * 8] === 255) {
+            coData[idx] = 255;
+            coData[idx + 1] = 255;
+            coData[idx + 2] = 255;
+            coData[idx + coW * 4] = 255;
+            coData[idx + coW * 4 + 1] = 255;
+            coData[idx + coW * 4 + 2] = 255;
           }
         }
       }
@@ -375,6 +397,8 @@ class AnprOcrService {
     }
     const ctx = dest.getContext('2d');
     if (!ctx) return src;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, dest.width, dest.height);
     ctx.translate(dest.width / 2, dest.height / 2);
     ctx.rotate(rad);
     ctx.drawImage(src, -src.width / 2, -src.height / 2);

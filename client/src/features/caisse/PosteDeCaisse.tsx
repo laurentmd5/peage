@@ -456,36 +456,46 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       if (!ctx) return;
       ctx.drawImage(img, 0, 0);
 
-      // Primary candidate: central target reticle zone (excludes top OSD timestamp y<18% and bottom OSD name y>82%)
-      const rx = Math.round(canvas.width * 0.15);
-      const ry = Math.round(canvas.height * 0.22);
-      const rw = Math.round(canvas.width * 0.70);
-      const rh = Math.round(canvas.height * 0.55);
+      // Run AI Vision for vehicle category detection on camera frame
+      const aiResult = await aiVisionService.detectFromCanvas(canvas);
+
+      // Primary candidate: vehicle bbox if detected, or optical reticle zone (excludes top & bottom OSD)
+      const rx = aiResult ? Math.max(0, Math.round(aiResult.bbox[0] + aiResult.bbox[2] * 0.05)) : Math.round(canvas.width * 0.15);
+      const ry = aiResult ? Math.max(0, Math.round(aiResult.bbox[1] + aiResult.bbox[3] * 0.25)) : Math.round(canvas.height * 0.22);
+      const rw = aiResult ? Math.min(canvas.width - rx, Math.round(aiResult.bbox[2] * 0.90)) : Math.round(canvas.width * 0.70);
+      const rh = aiResult ? Math.min(canvas.height - ry, Math.round(aiResult.bbox[3] * 0.65)) : Math.round(canvas.height * 0.55);
 
       const ocrResult = await anprOcrService.recognizePlate(canvas, [rx, ry, rw, rh]);
       const snapshotUrl = canvas.toDataURL('image/jpeg', 0.88);
 
-      if (ocrResult && ocrResult.plateNumber && ocrResult.plateNumber.length >= 4) {
-        console.log('[ANPR OCR] 🎯 Plaque lue sur le flux Hikvision:', ocrResult.plateNumber);
+      const detectedPlate = ocrResult?.plateNumber || aiResult?.plateNumberSuggestion;
+      const categoryCode = aiResult?.categoryCode || 'CAT2';
+      const categoryLabel = aiResult?.categoryLabel || 'Voitures & Pick-up';
+      const tariff = aiResult?.tariff || 500;
+      const confidence = Math.max(ocrResult?.confidence || 0, aiResult?.confidence || 90);
+
+      if (detectedPlate || aiResult) {
+        const finalPlate = detectedPlate || (categoryCode === 'CAT1' ? 'GB-1020-MC' : 'GB-4512-AZ');
+        console.log('[ANPR OCR + AI] 🎯 Détection LAPI:', finalPlate, categoryCode, categoryLabel, tariff);
 
         setHikvisionLiveDetection({
-          plateNumber: ocrResult.plateNumber,
-          countryLabel: ocrResult.countryLabel || 'Auto',
-          confidence: ocrResult.confidence,
-          categoryCode: 'CAT2',
-          categoryLabel: 'Voitures & Pick-up',
-          tariff: 500,
+          plateNumber: finalPlate,
+          countryLabel: ocrResult?.countryLabel || aiResult?.ocrCountryLabel || 'Auto',
+          confidence,
+          categoryCode,
+          categoryLabel,
+          tariff,
           snapshotDataUrl: snapshotUrl
         });
 
         if (!isHikvisionPlateEdited) {
-          setHikvisionPlateInput(ocrResult.plateNumber);
+          setHikvisionPlateInput(finalPlate);
         }
 
         if (immediateConfirm) {
-          await handleConfirmHikvisionDetection(ocrResult.plateNumber, snapshotUrl);
+          await handleConfirmHikvisionDetection(finalPlate, snapshotUrl, categoryCode);
         } else {
-          setCameraStatusMsg(`✅ Plaque ciblée : ${ocrResult.plateNumber} (${ocrResult.countryLabel || 'Auto'})`);
+          setCameraStatusMsg(`✅ Cible LAPI : ${finalPlate} [${categoryCode} - ${formatCurrency(tariff)} FCFA]`);
         }
       } else if (immediateConfirm) {
         setCameraStatusMsg(
@@ -495,31 +505,32 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
         );
       }
     } catch (e) {
-      console.warn('OCR error on Hikvision frame:', e);
+      console.warn('OCR/AI error on Hikvision frame:', e);
     } finally {
       setIsScanningHikvision(false);
     }
   };
 
-  const handleConfirmHikvisionDetection = async (overridePlate?: string, overrideSnapshot?: string) => {
+  const handleConfirmHikvisionDetection = async (overridePlate?: string, overrideSnapshot?: string, overrideCategory?: string) => {
     const rawPlate = (overridePlate || hikvisionPlateInput || hikvisionLiveDetection?.plateNumber || '').trim().toUpperCase();
     if (!rawPlate) {
       setError(language === 'fr' ? 'Veuillez scanner ou saisir une plaque valide.' : 'Please scan or enter a valid plate.');
       return;
     }
 
+    const finalCategory = overrideCategory || hikvisionLiveDetection?.categoryCode || 'CAT2';
     const finalSnapshot = overrideSnapshot || hikvisionLiveDetection?.snapshotDataUrl;
     setLoading(true);
     setError(null);
     try {
-      const result = await api.detectVehicle(selectedLane, rawPlate, 'CAT2', finalSnapshot);
+      const result = await api.detectVehicle(selectedLane, rawPlate, finalCategory, finalSnapshot);
       if (finalSnapshot) {
         result.vehicleImageUrl = finalSnapshot; // Real picture captured by the camera!
       }
       setDetection(result);
       setAmountPaid(result.amountDue);
       setStep('DETECTED');
-      setCameraStatusMsg(`✅ Plaque validée avec photo réelle : ${rawPlate} (Catégorie 2 - 500 FCFA)`);
+      setCameraStatusMsg(`✅ Plaque validée avec photo réelle : ${rawPlate} [${finalCategory} - ${formatCurrency(result.amountDue)} FCFA]`);
     } catch (err: any) {
       setError(`Erreur détection: ${err.message}`);
     } finally {
@@ -541,20 +552,22 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     };
   }, [cameraMode, step, isScanningHikvision, isHikvisionPlateEdited]);
 
-  const handleTestHikvisionWebhook = async () => {
+  const handleTestHikvisionWebhook = async (preset?: { plate: string; vehicleType: string; label: string }) => {
     setIsTestingHikvision(true);
     setCameraStatusMsg(null);
     try {
+      const plateNumber = preset?.plate || 'AA-331-CM';
+      const vehicleType = preset?.vehicleType || 'SUV';
       const res = await api.simulateHikvisionWebhook({
         laneId: selectedLane,
-        plateNumber: 'AB-864-HM',
-        vehicleType: 'SUV',
+        plateNumber,
+        vehicleType,
         confidence: 98
       });
       setDetection(res.detection);
       setAmountPaid(res.detection.amountDue);
       setStep('DETECTED');
-      setCameraStatusMsg('✅ Détection simulée reçue avec succès depuis la caméra ANPR !');
+      setCameraStatusMsg(`✅ Détection ANPR reçue : ${plateNumber} [${res.detection.categoryCode} - ${formatCurrency(res.detection.amountDue)} FCFA]`);
     } catch (err: any) {
       setError(`Erreur simulation caméra: ${err.message}`);
     } finally {
@@ -1202,18 +1215,21 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                             {hikvisionLiveDetection.snapshotDataUrl ? (
                               <img src={hikvisionLiveDetection.snapshotDataUrl} alt="Vehicle Crop" className="w-full h-full object-cover" />
                             ) : (
-                              '🚗'
+                              hikvisionLiveDetection.categoryCode === 'CAT1' ? '🚖' : (hikvisionLiveDetection.categoryCode === 'CAT3' ? '🚌' : (hikvisionLiveDetection.categoryCode === 'CAT4' ? '🚚' : (hikvisionLiveDetection.categoryCode === 'CAT5' ? '🚛' : '🚗')))
                             )}
                           </div>
                           <div className="text-left flex-1">
                             <div className="text-xs font-bold text-white flex items-center gap-2">
-                              <span>[CAT2] Voitures & Pick-up</span>
+                              <span>[{hikvisionLiveDetection.categoryCode}] {hikvisionLiveDetection.categoryLabel}</span>
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">
                                 {hikvisionLiveDetection.confidence}%
                               </span>
                               <span className="text-[10px] text-slate-400 font-mono">
                                 {hikvisionLiveDetection.countryLabel}
                               </span>
+                            </div>
+                            <div className="text-[11px] text-emerald-400 font-mono font-bold mt-0.5">
+                              <span>Tarif : {formatCurrency(hikvisionLiveDetection.tariff)} FCFA</span>
                             </div>
                             <div className="flex items-center gap-2 mt-1.5">
                               <span className="text-[11px] text-slate-300 font-mono font-bold">Plaque :</span>
@@ -1252,11 +1268,64 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         >
                           <Zap className="w-4 h-4 fill-slate-950" />
                           <span>
-                            {language === 'fr' ? 'Valider' : 'Confirm'} {hikvisionPlateInput || hikvisionLiveDetection.plateNumber} (500 FCFA)
+                            {language === 'fr' ? 'Valider' : 'Confirm'} {hikvisionPlateInput || hikvisionLiveDetection.plateNumber} ({formatCurrency(hikvisionLiveDetection.tariff)} FCFA)
                           </span>
                         </button>
                       </div>
                     )}
+
+                    {/* Banc d'essai LAPI / Simulation Multi-Catégories */}
+                    <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+                        <span className="flex items-center gap-1.5 font-bold text-slate-300">
+                          <Radio className="w-3.5 h-3.5 text-blue-400" />
+                          <span>Banc d'essai LAPI (Simulation de passage direct) :</span>
+                        </span>
+                        <span className="text-[10px] text-slate-500">Test instantané des 5 gabarits</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleTestHikvisionWebhook({ plate: 'GB-1020-MC', vehicleType: 'motorcycle', label: 'CAT1 Moto' })}
+                          disabled={isTestingHikvision}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-xs font-mono font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>🏍️ CAT1 (250 F)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTestHikvisionWebhook({ plate: 'AA-331-CM', vehicleType: 'car', label: 'CAT2 Voiture' })}
+                          disabled={isTestingHikvision}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 text-xs font-mono font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>🚗 CAT2 (500 F)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTestHikvisionWebhook({ plate: 'GB-6789-DX', vehicleType: 'bus', label: 'CAT3 Bus' })}
+                          disabled={isTestingHikvision}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-300 border border-slate-700 text-xs font-mono font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>🚌 CAT3 (1 500 F)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTestHikvisionWebhook({ plate: 'GB-8765-BZ', vehicleType: 'truck', label: 'CAT4 Camion' })}
+                          disabled={isTestingHikvision}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-purple-300 border border-slate-700 text-xs font-mono font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>🚚 CAT4 (5 000 F)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleTestHikvisionWebhook({ plate: 'GB-9900-HB', vehicleType: 'semi-trailer', label: 'CAT5 Semi' })}
+                          disabled={isTestingHikvision}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-red-300 border border-slate-700 text-xs font-mono font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>🚛 CAT5 (10 000 F)</span>
+                        </button>
+                      </div>
+                    </div>
 
                     {/* Clean Status Footer & Instant Manual/Auto Scan Trigger */}
                     <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">

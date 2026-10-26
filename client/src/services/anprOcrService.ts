@@ -71,26 +71,23 @@ class AnprOcrService {
       ctx.drawImage(sourceCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
       const data = ctx.getImageData(0, 0, rw, rh).data;
 
-      // 1. Primary detector: Horizontal character edge-transition density + bright background
-      // License plate text (e.g. AA-112-AA) creates 10..28 sharp horizontal dark<->bright transitions per row,
-      // whereas horizontal radiator grille slats have almost zero horizontal transitions.
+      // 1. Primary detector: Horizontal character edge-transition density + bright plate island
+      // Focus horizontal scan on central 22%..86% width (excludes background wall text on far left/right)
       const rowBright = new Int32Array(rh);
       const rowTransitions = new Int32Array(rh);
-      const xStartScan = Math.round(rw * 0.08);
-      const xEndScan = Math.round(rw * 0.92);
+      const xStartScan = Math.round(rw * 0.22);
+      const xEndScan = Math.round(rw * 0.86);
 
       for (let y = 0; y < rh; y++) {
         let prevLum = -1;
-        for (let x = 0; x < rw; x++) {
+        for (let x = xStartScan; x <= xEndScan; x++) {
           const idx = (y * rw + x) * 4;
           const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-          if (lum > 150) rowBright[y]++;
-          if (x >= xStartScan && x <= xEndScan) {
-            if (prevLum !== -1 && Math.abs(lum - prevLum) > 38) {
-              rowTransitions[y]++;
-            }
-            prevLum = lum;
+          if (lum > 145) rowBright[y]++;
+          if (prevLum !== -1 && Math.abs(lum - prevLum) > 38) {
+            rowTransitions[y]++;
           }
+          prevLum = lum;
         }
       }
 
@@ -102,12 +99,12 @@ class AnprOcrService {
       let curTransScore = 0;
 
       for (let y = 0; y < rh; y++) {
-        const isPlateRow = rowTransitions[y] >= 8 && rowBright[y] > rw * 0.10;
+        const isPlateRow = rowTransitions[y] >= 6 && rowBright[y] > (xEndScan - xStartScan) * 0.10;
         if (isPlateRow) {
           if (curTransStart === -1) curTransStart = y;
           curTransScore += rowTransitions[y];
           const runLen = y - curTransStart + 1;
-          if (runLen >= 10 && runLen <= rh * 0.35 && curTransScore > maxTransScore) {
+          if (runLen >= 10 && runLen <= rh * 0.38 && curTransScore > maxTransScore) {
             maxTransScore = curTransScore;
             bestTransStartY = curTransStart;
             bestTransEndY = y;
@@ -120,91 +117,60 @@ class AnprOcrService {
 
       if (bestTransStartY !== -1 && (bestTransEndY - bestTransStartY) >= 10) {
         const bandH = bestTransEndY - bestTransStartY;
-        const colActivity = new Int32Array(rw);
+        // Count ONLY actual horizontal character edge transitions per column (ignores flat white walls!)
+        const colEdges = new Int32Array(rw);
         for (let y = bestTransStartY; y <= bestTransEndY; y++) {
-          for (let x = 2; x < rw - 2; x++) {
+          for (let x = xStartScan; x <= xEndScan; x++) {
             const idx = (y * rw + x) * 4;
             const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
             const prevIdx = (y * rw + (x - 2)) * 4;
             const prevL = 0.299 * data[prevIdx] + 0.587 * data[prevIdx + 1] + 0.114 * data[prevIdx + 2];
-            if (lum > 150 || Math.abs(lum - prevL) > 38) {
-              colActivity[x]++;
+            if (Math.abs(lum - prevL) > 36) {
+              colEdges[x]++;
             }
           }
         }
 
-        let minX = rw;
-        let maxX = 0;
-        for (let x = 0; x < rw; x++) {
-          if (colActivity[x] > bandH * 0.25) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
+        // Find the strongest contiguous horizontal cluster of character edges (bridging inter-character spaces up to 4% of rw)
+        const maxGap = Math.max(8, Math.round(rw * 0.04));
+        let bestClusterX1 = -1;
+        let bestClusterX2 = -1;
+        let bestClusterScore = 0;
+        let curX1 = -1;
+        let curX2 = -1;
+        let curScore = 0;
+        let gapCount = 0;
+
+        for (let x = xStartScan; x <= xEndScan; x++) {
+          if (colEdges[x] >= Math.max(2, Math.round(bandH * 0.12))) {
+            if (curX1 === -1) curX1 = x;
+            curX2 = x;
+            curScore += colEdges[x];
+            gapCount = 0;
+            if (curScore > bestClusterScore) {
+              bestClusterScore = curScore;
+              bestClusterX1 = curX1;
+              bestClusterX2 = curX2;
+            }
+          } else if (curX1 !== -1) {
+            gapCount++;
+            if (gapCount > maxGap) {
+              curX1 = -1;
+              curX2 = -1;
+              curScore = 0;
+              gapCount = 0;
+            }
           }
         }
 
-        const candW = maxX - minX;
-        if (candW >= 55 && candW > bandH * 1.5) {
-          const padX = Math.round(candW * 0.08);
-          const padY = Math.round(bandH * 0.28);
-          const px = Math.max(0, minX - padX);
+        const candW = bestClusterX2 - bestClusterX1;
+        if (bestClusterX1 !== -1 && candW >= 50 && candW <= rw * 0.65 && candW > bandH * 1.3) {
+          const padX = Math.round(candW * 0.12);
+          const padY = Math.round(bandH * 0.35);
+          const px = Math.max(0, bestClusterX1 - padX);
           const py = Math.max(0, bestTransStartY - padY);
           const pw = Math.min(rw - px, candW + padX * 2);
           const ph = Math.min(rh - py, bandH + padY * 2);
-          return { x: rx + px, y: ry + py, w: pw, h: ph };
-        }
-      }
-
-      // 2. Secondary detector: Contiguous bright horizontal band
-      let bestStartY = -1;
-      let bestEndY = -1;
-      let maxRun = 0;
-      let curRun = 0;
-      let curStart = -1;
-
-      for (let y = 0; y < rh; y++) {
-        if (rowBright[y] > rw * 0.15) {
-          if (curStart === -1) curStart = y;
-          curRun++;
-          if (curRun > maxRun) {
-            maxRun = curRun;
-            bestStartY = curStart;
-            bestEndY = y;
-          }
-        } else {
-          curStart = -1;
-          curRun = 0;
-        }
-      }
-
-      if (maxRun >= 14 && bestStartY !== -1) {
-        const padY = Math.round(maxRun * 0.15);
-        const py = Math.max(0, bestStartY - padY);
-        const ph = Math.min(rh - py, (bestEndY - bestStartY) + padY * 2);
-
-        const colBright = new Int32Array(rw);
-        for (let y = bestStartY; y <= bestEndY; y++) {
-          for (let x = 0; x < rw; x++) {
-            const idx = (y * rw + x) * 4;
-            const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-            if (lum > 150) colBright[x]++;
-          }
-        }
-
-        let minX = rw;
-        let maxX = 0;
-        for (let x = 0; x < rw; x++) {
-          if (colBright[x] > (bestEndY - bestStartY) * 0.18) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-          }
-        }
-
-        const candidateW = maxX - minX;
-        const candidateH = bestEndY - bestStartY;
-        if (candidateW >= 60 && candidateH >= 14 && candidateH <= rh * 0.35 && candidateW > candidateH * 1.6) {
-          const padX = Math.round(candidateW * 0.06);
-          const px = Math.max(0, minX - padX);
-          const pw = Math.min(rw - px, candidateW + padX * 2);
           return { x: rx + px, y: ry + py, w: pw, h: ph };
         }
       }
@@ -212,13 +178,13 @@ class AnprOcrService {
       // Fallback on error
     }
 
-    // Default targeted vehicle plate strip (~3.8:1 aspect ratio in central lower bumper)
+    // Default targeted vehicle plate region (central zone covering upper-mid and mid bumper where AA-112-AA sits)
     if (rh > 80 && rw > 120) {
       return {
-        x: rx + Math.round(rw * 0.20),
-        y: ry + Math.round(rh * 0.36),
-        w: Math.round(rw * 0.60),
-        h: Math.round(rh * 0.26)
+        x: rx + Math.round(rw * 0.25),
+        y: ry + Math.round(rh * 0.12),
+        w: Math.round(rw * 0.52),
+        h: Math.round(rh * 0.36)
       };
     }
 
@@ -258,7 +224,16 @@ class AnprOcrService {
     const gray = new Uint8ClampedArray(total);
 
     for (let i = 0; i < data.length; i += 4) {
-      gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      // Suppress European blue euro-bands ([F] on left, [75] on right) so they become clean white margin
+      // instead of a black vertical block merging with the first or last character
+      if (b > r + 18 && b > g + 8 && r < 120) {
+        gray[i / 4] = 255;
+      } else {
+        gray[i / 4] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+      }
     }
 
     const margin = 16;
@@ -311,11 +286,28 @@ class AnprOcrService {
         }
       }
 
+      // Suppress dark vertical side-borders (Euroband or dark car grille on left/right 14% of plate crop)
+      const sideEdgeW = Math.round(targetW * 0.14);
+      for (let x = 0; x < targetW; x++) {
+        if (x < sideEdgeW || x > targetW - sideEdgeW) {
+          let darkCount = 0;
+          for (let y = 0; y < targetH; y++) {
+            if (outData[(y * targetW + x) * 4] === 0) darkCount++;
+          }
+          if (darkCount > targetH * 0.55) {
+            for (let y = 0; y < targetH; y++) {
+              const idx = (y * targetW + x) * 4;
+              outData[idx] = 255;
+              outData[idx + 1] = 255;
+              outData[idx + 2] = 255;
+            }
+          }
+        }
+      }
+
       outCtx.putImageData(outImg, margin, margin);
 
-      // Despeckle / Despike filter: remove thin 1px/2px vertical noise lines (spokes, screen scanlines)
-      // Characters on license plates at targetH>=55 have stroke widths of >= 4 pixels.
-      // This permanently prevents Tesseract Leptonica WASM "Image too small to scale!! (1x36 vs min width of 3)" errors.
+      // Despeckle / Despike filter: remove thin 1px/2px vertical/horizontal noise lines
       const cleanedImg = outCtx.getImageData(0, 0, outCanvas.width, outCanvas.height);
       const cData = cleanedImg.data;
       const cW = outCanvas.width;
@@ -330,13 +322,11 @@ class AnprOcrService {
             const topIsWhite = cData[idx - cW * 4] === 255;
             const bottomIsWhite = cData[idx + cW * 4] === 255;
 
-            // Remove isolated 1px width line in either horizontal OR vertical orientation
             if ((leftIsWhite && rightIsWhite) || (topIsWhite && bottomIsWhite)) {
               cData[idx] = 255;
               cData[idx + 1] = 255;
               cData[idx + 2] = 255;
             } else if (leftIsWhite && x < cW - margin - 1 && cData[idx + 4] === 0 && cData[idx + 8] === 255) {
-              // Remove isolated 2px width vertical artifact
               cData[idx] = 255;
               cData[idx + 1] = 255;
               cData[idx + 2] = 255;
@@ -345,7 +335,6 @@ class AnprOcrService {
               cData[idx + 6] = 255;
               x++;
             } else if (topIsWhite && y < cH - margin - 1 && cData[idx + cW * 4] === 0 && cData[idx + cW * 8] === 255) {
-              // Remove isolated 2px height horizontal artifact
               cData[idx] = 255;
               cData[idx + 1] = 255;
               cData[idx + 2] = 255;
@@ -408,9 +397,27 @@ class AnprOcrService {
       outData[i + 3] = 255;
     }
 
+    // Suppress dark vertical side-borders in Otsu mode as well
+    const sideEdgeWOtsu = Math.round(targetW * 0.14);
+    for (let x = 0; x < targetW; x++) {
+      if (x < sideEdgeWOtsu || x > targetW - sideEdgeWOtsu) {
+        let darkCount = 0;
+        for (let y = 0; y < targetH; y++) {
+          if (outData[(y * targetW + x) * 4] === 0) darkCount++;
+        }
+        if (darkCount > targetH * 0.55) {
+          for (let y = 0; y < targetH; y++) {
+            const idx = (y * targetW + x) * 4;
+            outData[idx] = 255;
+            outData[idx + 1] = 255;
+            outData[idx + 2] = 255;
+          }
+        }
+      }
+    }
+
     outCtx.putImageData(outImg, margin, margin);
 
-    // Despeckle / Despike filter: remove thin 1px/2px vertical noise lines for Otsu mode as well
     const cleanedImgOtsu = outCtx.getImageData(0, 0, outCanvas.width, outCanvas.height);
     const coData = cleanedImgOtsu.data;
     const coW = outCanvas.width;
@@ -425,7 +432,6 @@ class AnprOcrService {
           const topIsWhite = coData[idx - coW * 4] === 255;
           const bottomIsWhite = coData[idx + coW * 4] === 255;
 
-          // Remove isolated 1px width line in either horizontal OR vertical orientation
           if ((leftIsWhite && rightIsWhite) || (topIsWhite && bottomIsWhite)) {
             coData[idx] = 255;
             coData[idx + 1] = 255;
@@ -455,10 +461,9 @@ class AnprOcrService {
   }
 
   /**
-   * Rotate a canvas by 90, 180, or 270 degrees
-   * Used for auto-correcting cameras or test videos mounted on their sides (portrait vs landscape)
+   * Rotate a canvas by 90, 180, or 270 degrees, or deskew by small perspective tilt angles (e.g. +9° / -9°)
    */
-  rotateCanvas(src: HTMLCanvasElement, degrees: 90 | 180 | 270): HTMLCanvasElement {
+  rotateCanvas(src: HTMLCanvasElement, degrees: number): HTMLCanvasElement {
     const dest = document.createElement('canvas');
     const rad = (degrees * Math.PI) / 180;
     if (degrees === 90 || degrees === 270) {
@@ -468,7 +473,7 @@ class AnprOcrService {
       dest.width = src.width;
       dest.height = src.height;
     }
-    const ctx = dest.getContext('2d');
+    const ctx = dest.getContext('2d', { willReadFrequently: true });
     if (!ctx) return src;
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, dest.width, dest.height);
@@ -524,7 +529,22 @@ class AnprOcrService {
           };
         }
 
-        // Pass 2: Otsu binarization on targeted plate subcrop
+        // Pass 2: Perspective Deskew (+9° and -9°) for 3/4 angled toll lane cameras (like tilted AA-112-AA)
+        for (const tiltAngle of [9, -9] as const) {
+          const deskewed = this.rotateCanvas(canvasAdapt, tiltAngle);
+          const resDeskew = await this.worker.recognize(deskewed);
+          const rawDeskew = resDeskew.data.text ? resDeskew.data.text.trim() : '';
+          const normDeskew = rawDeskew ? normalizePlateText(rawDeskew) : null;
+          if (normDeskew) {
+            return {
+              ...normDeskew,
+              rawText: rawDeskew,
+              processedImageCrop: deskewed.toDataURL('image/jpeg', 0.85)
+            };
+          }
+        }
+
+        // Pass 3: Otsu binarization on targeted plate subcrop
         const canvasOtsu = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'otsu');
         const resOtsu = await this.worker.recognize(canvasOtsu);
         const rawOtsu = resOtsu.data.text ? resOtsu.data.text.trim() : '';
@@ -537,41 +557,21 @@ class AnprOcrService {
           };
         }
 
-        // Pass 3: Direct scaled crop with clean white margin
-        const scale = 2.0;
-        const directCanvas = document.createElement('canvas');
-        directCanvas.width = Math.round(plateCrop.w * scale) + 24;
-        directCanvas.height = Math.round(plateCrop.h * scale) + 24;
-        const dCtx = directCanvas.getContext('2d', { willReadFrequently: true });
-        if (dCtx) {
-          dCtx.fillStyle = '#ffffff';
-          dCtx.fillRect(0, 0, directCanvas.width, directCanvas.height);
-          dCtx.imageSmoothingEnabled = true;
-          dCtx.imageSmoothingQuality = 'high';
-          dCtx.drawImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 12, 12, directCanvas.width - 24, directCanvas.height - 24);
-          const resDirect = await this.worker.recognize(directCanvas);
-          const rawDirect = resDirect.data.text ? resDirect.data.text.trim() : '';
-          const normDirect = rawDirect ? normalizePlateText(rawDirect) : null;
-          if (normDirect) {
-            return {
-              ...normDirect,
-              rawText: rawDirect,
-              processedImageCrop: directCanvas.toDataURL('image/jpeg', 0.85)
-            };
-          }
-        }
-
-        // Pass 4: Fallback to full optical reticle bounding box (crucial for papers and large plates)
+        // Pass 4: Fallback to central plate zone if plateCrop differed
         if (plateCrop.w !== cropW || plateCrop.h !== cropH) {
-          const reticleAdapt = this.preprocessPlateImage(srcCanvas, cropX, cropY, cropW, cropH, 'adaptive');
-          const resReticle = await this.worker.recognize(reticleAdapt);
-          const rawReticle = resReticle.data.text ? resReticle.data.text.trim() : '';
-          const normReticle = rawReticle ? normalizePlateText(rawReticle) : null;
-          if (normReticle) {
+          const midX = cropX + Math.round(cropW * 0.22);
+          const midY = cropY + Math.round(cropH * 0.12);
+          const midW = Math.round(cropW * 0.56);
+          const midH = Math.round(cropH * 0.42);
+          const midAdapt = this.preprocessPlateImage(srcCanvas, midX, midY, midW, midH, 'adaptive');
+          const resMid = await this.worker.recognize(midAdapt);
+          const rawMid = resMid.data.text ? resMid.data.text.trim() : '';
+          const normMid = rawMid ? normalizePlateText(rawMid) : null;
+          if (normMid) {
             return {
-              ...normReticle,
-              rawText: rawReticle,
-              processedImageCrop: reticleAdapt.toDataURL('image/jpeg', 0.85)
+              ...normMid,
+              rawText: rawMid,
+              processedImageCrop: midAdapt.toDataURL('image/jpeg', 0.85)
             };
           }
         }
@@ -610,6 +610,23 @@ class AnprOcrService {
       let rawText = result.data.text ? result.data.text.trim() : '';
       let normalized = rawText ? normalizePlateText(rawText) : null;
       let activeCanvas = adaptCanvas1;
+
+      // Try Deskew (+9° / -9°) on Candidate 1
+      if (!normalized) {
+        for (const tiltAngle of [9, -9] as const) {
+          const deskewCanvas1 = this.rotateCanvas(adaptCanvas1, tiltAngle);
+          const resDeskew1 = await this.worker.recognize(deskewCanvas1);
+          const rawDeskew1 = resDeskew1.data.text ? resDeskew1.data.text.trim() : '';
+          const normDeskew1 = rawDeskew1 ? normalizePlateText(rawDeskew1) : null;
+          if (normDeskew1) {
+            result = resDeskew1;
+            rawText = rawDeskew1;
+            normalized = normDeskew1;
+            activeCanvas = deskewCanvas1;
+            break;
+          }
+        }
+      }
 
       // Try Otsu on Candidate 1 if adaptive didn't produce a normalized plate
       if (!normalized) {
@@ -706,18 +723,15 @@ class AnprOcrService {
 
 /**
  * Normalizes and grammatically corrects OCR text to Guinea-Bissau (GB), Senegal (DK) or International transit formats
- * Resolves standard OCR glyph confusions (e.g. 8 <-> B, 0 <-> O, 1 <-> I, 4 <-> A, 5 <-> S, 6 <-> G, 7 <-> T)
+ * Resolves strict optical glyph confusions (0 <-> O/D, 1 <-> I/L, 2 <-> Z, 5 <-> S, 8 <-> B)
+ * NEVER converts French vowels/consonants (A, E, T, G) into digits to avoid hallucinating words into plates.
  */
 function correctDigits(str: string): string {
   return str
-    .replace(/O|D/g, '0')
+    .replace(/O|D|Q/g, '0')
     .replace(/I|L/g, '1')
     .replace(/Z/g, '2')
-    .replace(/E/g, '3')
-    .replace(/A/g, '4')
     .replace(/S/g, '5')
-    .replace(/G/g, '6')
-    .replace(/T/g, '7')
     .replace(/B/g, '8');
 }
 
@@ -726,12 +740,13 @@ function correctLetters(str: string): string {
     .replace(/0/g, 'O')
     .replace(/1/g, 'I')
     .replace(/2/g, 'Z')
-    .replace(/3/g, 'E')
     .replace(/4/g, 'A')
     .replace(/5/g, 'S')
-    .replace(/6/g, 'G')
-    .replace(/7/g, 'T')
     .replace(/8/g, 'B');
+}
+
+function countActualDigits(str: string): number {
+  return (str.match(/[0-9]/g) || []).length;
 }
 
 /**
@@ -745,8 +760,8 @@ function parseSinglePlateCandidate(clean: string): {
 } | null {
   if (!clean || clean.length < 5) return null;
 
-  // Reject on-screen display timestamp / camera text (e.g. "04-24-2020", "FRI", "CAMERA 01")
-  if (/CAMERA|FRI|MON|TUE|WED|THU|SAT|SUN/.test(clean)) return null;
+  // Reject on-screen display timestamp / camera text / background wall text
+  if (/CAMERA|FRI|MON|TUE|WED|THU|SAT|SUN|SYSTEM|SECURIT|VIDEO|INFORM|CONTROL/.test(clean)) return null;
 
   // 1. Guinea-Bissau Match: GB + 3-4 digits + 1-2 letters (e.g. GB-2345-AF, GB-123-AF)
   let gbCandidate = clean;
@@ -754,15 +769,13 @@ function parseSinglePlateCandidate(clean: string): {
     gbCandidate = 'GB' + gbCandidate.substring(2);
   }
 
-  const gbPattern = /^GB([0-9OIZSBLAEGT]{3,4})([A-Z0-9]{1,2})$/;
+  const gbPattern = /^GB([0-9OIZSBL]{3,4})([A-Z0-9]{1,2})$/;
   const gbMatch = gbCandidate.match(gbPattern);
   if (gbMatch) {
     const rawDigits = gbMatch[1];
     const rawLetters = gbMatch[2];
 
-    // Suffix must NOT contain digits that cannot be letters (i.e., reject 3, 4, 6, 7, 9)
-    // and if suffix was a pure digit like '4', reject it
-    if (!/[34679]/.test(rawLetters) && !/^\d+$/.test(rawLetters)) {
+    if (countActualDigits(rawDigits) >= 2 && !/[34679]/.test(rawLetters) && !/^\d+$/.test(rawLetters)) {
       return {
         plateNumber: `GB-${correctDigits(rawDigits)}-${correctLetters(rawLetters)}`,
         confidence: 96,
@@ -780,10 +793,10 @@ function parseSinglePlateCandidate(clean: string): {
     snPrefix = 'DK';
     snRemainder = snRemainder.substring(2);
   } else if (/^(ZG|2G|7G)/i.test(snRemainder)) {
-    snPrefix = 'ZG'; // Ziguinchor Casamance border
+    snPrefix = 'ZG';
     snRemainder = snRemainder.substring(2);
   } else if (/^(KD|KO|K0)/i.test(snRemainder)) {
-    snPrefix = 'KD'; // Kolda border
+    snPrefix = 'KD';
     snRemainder = snRemainder.substring(2);
   } else if (/^(TH|KL|SL)/i.test(snRemainder)) {
     snPrefix = snRemainder.substring(0, 2).toUpperCase();
@@ -791,13 +804,13 @@ function parseSinglePlateCandidate(clean: string): {
   }
 
   if (snPrefix) {
-    const snPattern = /^([0-9OIZSBLAEGT]{3,4})([A-Z0-9]{1,2})$/;
+    const snPattern = /^([0-9OIZSBL]{3,4})([A-Z0-9]{1,2})$/;
     const snMatch = snRemainder.match(snPattern);
     if (snMatch) {
       const rawDigits = snMatch[1];
       const rawLetters = snMatch[2];
 
-      if (!/[34679]/.test(rawLetters) && !/^\d+$/.test(rawLetters)) {
+      if (countActualDigits(rawDigits) >= 2 && !/[34679]/.test(rawLetters) && !/^\d+$/.test(rawLetters)) {
         return {
           plateNumber: `${snPrefix}-${correctDigits(rawDigits)}-${correctLetters(rawLetters)}`,
           confidence: 95,
@@ -808,19 +821,30 @@ function parseSinglePlateCandidate(clean: string): {
     }
   }
 
-  // 3. International / European import format: 2 letters - 3 digits - 2 letters (e.g. AA-112-AA, AB-093-FB)
+  // 3. International / European SIV import format: 2 letters - 3 digits - 2 letters (e.g. AA-112-AA, AB-093-FB)
   // Tolerates single euro-band letter prefix (F, L, D...) and trailing region digits (75, 13...)
-  const intlRegex = /^(?:[A-Z]{1})?([A-Z0-9]{2})([0-9OIZSBLAEGT]{3})([A-Z0-9]{2})(?:[0-9]{2})?$/;
+  const intlRegex = /^(?:[A-Z]{1})?([A-Z0-9]{2})([0-9OIZSBL]{3})([A-Z0-9]{2})(?:[0-9]{2})?$/;
   const intlMatch = clean.match(intlRegex);
   if (intlMatch) {
-    const rawPrefix = intlMatch[1];
+    let rawPrefix = intlMatch[1];
     const rawDigits = intlMatch[2];
     const rawSuffix = intlMatch[3];
 
-    // Suffix and prefix must not be pure digits or contain 3, 4, 6, 7, 9
-    if (!/[34679]/.test(rawPrefix) && !/[34679]/.test(rawSuffix) && !/^\d+$/.test(rawPrefix) && !/^\d+$/.test(rawSuffix)) {
+    if (
+      countActualDigits(rawDigits) >= 2 &&
+      !/[3679]/.test(rawPrefix) &&
+      !/[3679]/.test(rawSuffix) &&
+      !/^\d+$/.test(rawPrefix) &&
+      !/^\d+$/.test(rawSuffix)
+    ) {
+      let cleanPref = correctLetters(rawPrefix);
+      const cleanSuf = correctLetters(rawSuffix);
+      // If left Euroband [F] corrupted the first character of a symmetric SIV plate (e.g. BA-112-AA, IA-112-AA, FA-112-AA -> AA-112-AA)
+      if (/^[FBIS8I][A-Z]$/.test(cleanPref) && cleanPref[1] === cleanSuf[0] && cleanSuf[0] === cleanSuf[1]) {
+        cleanPref = cleanPref[1] + cleanPref[1];
+      }
       return {
-        plateNumber: `${correctLetters(rawPrefix)}-${correctDigits(rawDigits)}-${correctLetters(rawSuffix)}`,
+        plateNumber: `${cleanPref}-${correctDigits(rawDigits)}-${cleanSuf}`,
         confidence: 96,
         country: 'UNKNOWN',
         countryLabel: '🌐 Transit / Import'
@@ -828,20 +852,41 @@ function parseSinglePlateCandidate(clean: string): {
     }
   }
 
-  // 4. Unprefixed Guinea-Bissau: strictly 4 digits + 2 letters (e.g. 4512 AZ -> GB-4512-AZ)
-  // Rejects 3-digit noise (e.g. 471NN)
-  const genMatch = clean.match(/^([0-9OIZSBLAEGT]{4})([A-Z0-9]{2})$/);
+  // 3b. SIV plate with left character clipped by Euroband (e.g. "A112AA", "I112AA", "B112AA", "1112AA", "8112AA" -> "AA-112-AA")
+  const clippedSivMatch = clean.match(/^(?:[FBI18])?([A-Z])?([0-9]{3})([A-Z]{2})(?:[0-9]{2})?$/);
+  if (clippedSivMatch) {
+    const leadLetter = clippedSivMatch[1];
+    const digits3 = clippedSivMatch[2];
+    const suffix2 = clippedSivMatch[3];
+    if (leadLetter && leadLetter === suffix2[0]) {
+      return {
+        plateNumber: `${leadLetter}${leadLetter}-${digits3}-${suffix2}`,
+        confidence: 94,
+        country: 'UNKNOWN',
+        countryLabel: '🌐 Transit / Import'
+      };
+    } else if (!leadLetter && suffix2[0] === suffix2[1]) {
+      return {
+        plateNumber: `${suffix2}-${digits3}-${suffix2}`,
+        confidence: 93,
+        country: 'UNKNOWN',
+        countryLabel: '🌐 Transit / Import'
+      };
+    }
+  }
+
+  // 4. Unprefixed Guinea-Bissau: strictly 4 REAL digits + 2 letters (e.g. 4512 AZ -> GB-4512-AZ)
+  // Requires 4 real digits so 6-char clipped SIV plates (like A112AA or B112AA) are never misclassified as GB-XXXX-YY
+  const genMatch = clean.match(/^([0-9]{4})([A-Z]{2})$/);
   if (genMatch) {
     const rawDigits = genMatch[1];
     const rawLetters = genMatch[2];
-    if (!/[34679]/.test(rawLetters) && !/^\d+$/.test(rawLetters)) {
-      return {
-        plateNumber: `GB-${correctDigits(rawDigits)}-${correctLetters(rawLetters)}`,
-        confidence: 90,
-        country: 'GW',
-        countryLabel: '🇬🇼 Guinée-Bissau'
-      };
-    }
+    return {
+      plateNumber: `GB-${rawDigits}-${rawLetters}`,
+      confidence: 90,
+      country: 'GW',
+      countryLabel: '🇬🇼 Guinée-Bissau'
+    };
   }
 
   return null;
@@ -859,12 +904,7 @@ export function normalizePlateText(raw: string): {
 } | null {
   if (!raw) return null;
 
-  // 1. Direct match on full clean string
-  const cleanRaw = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const directMatch = parseSinglePlateCandidate(cleanRaw);
-  if (directMatch) return directMatch;
-
-  // 2. Line by line analysis (essential when OCR reads brand, model, speed sticker or vehicle badge)
+  // 1. Line by line analysis first (prevents concatenating unrelated background wall lines together)
   const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   for (const line of lines) {
     const cleanLine = line.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -875,46 +915,40 @@ export function normalizePlateText(raw: string): {
     const words = line.split(/\s+/).filter(Boolean);
     if (words.length > 1) {
       for (let i = 0; i < words.length; i++) {
-        // 3-word combo
         if (i + 2 < words.length) {
           const combo3 = (words[i] + words[i + 1] + words[i + 2]).toUpperCase().replace(/[^A-Z0-9]/g, '');
           const m3 = parseSinglePlateCandidate(combo3);
           if (m3) return m3;
         }
-        // 2-word combo
         if (i + 1 < words.length) {
           const combo2 = (words[i] + words[i + 1]).toUpperCase().replace(/[^A-Z0-9]/g, '');
           const m2 = parseSinglePlateCandidate(combo2);
           if (m2) return m2;
         }
-        // 1-word token
         const single = words[i].toUpperCase().replace(/[^A-Z0-9]/g, '');
         const m1 = parseSinglePlateCandidate(single);
         if (m1) return m1;
       }
     }
-  }
 
-  // 3. Substring regex pattern extraction on clean text (e.g. "VOLVOAA112AAFH16")
-  // Matches European / International: 2 letters, 3 digits, 2 letters
-  const intlSub = cleanRaw.match(/(?:[A-Z]{1})?([A-Z]{2}[0-9OIZSBLAEGT]{3}[A-Z]{2})(?:[0-9]{2})?/);
-  if (intlSub && intlSub[1]) {
-    const subMatch = parseSinglePlateCandidate(intlSub[1]);
-    if (subMatch) return subMatch;
-  }
+    // Substring extraction within the same line (e.g. "F AA112AA 75")
+    const intlSub = cleanLine.match(/(?:[A-Z]{1})?([A-Z]{2}[0-9][0-9OIZSBL][0-9][A-Z]{2})(?:[0-9]{2})?/);
+    if (intlSub && intlSub[1]) {
+      const subMatch = parseSinglePlateCandidate(intlSub[1]);
+      if (subMatch) return subMatch;
+    }
 
-  // Matches Guinea-Bissau GB:
-  const gbSub = cleanRaw.match(/GB[0-9OIZSBLAEGT]{3,4}[A-Z]{1,2}/);
-  if (gbSub) {
-    const subMatch = parseSinglePlateCandidate(gbSub[0]);
-    if (subMatch) return subMatch;
-  }
+    const gbSub = cleanLine.match(/GB[0-9OIZSBL]{3,4}[A-Z]{1,2}/);
+    if (gbSub) {
+      const subMatch = parseSinglePlateCandidate(gbSub[0]);
+      if (subMatch) return subMatch;
+    }
 
-  // Matches Senegal:
-  const snSub = cleanRaw.match(/(?:DK|ZG|KD|TH|KL|SL)[0-9OIZSBLAEGT]{3,4}[A-Z]{1,2}/);
-  if (snSub) {
-    const subMatch = parseSinglePlateCandidate(snSub[0]);
-    if (subMatch) return subMatch;
+    const snSub = cleanLine.match(/(?:DK|ZG|KD|TH|KL|SL)[0-9OIZSBL]{3,4}[A-Z]{1,2}/);
+    if (snSub) {
+      const subMatch = parseSinglePlateCandidate(snSub[0]);
+      if (subMatch) return subMatch;
+    }
   }
 
   return null;

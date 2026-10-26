@@ -135,5 +135,25 @@ describe('ANPR / LAPI OCR Plate Normalization & Grammar Correction', () => {
       expect(res?.plateNumber).toBe('AB-093-FB');
       expect(res?.countryLabel).toBe('🌐 Transit / Import');
     });
+
+    it('should recover AA-112-AA when left Euroband clips or merges with first letter (A112AA, B112AA, I112AA, 1112AA, 8112AA)', () => {
+      expect(normalizePlateText('A112AA')?.plateNumber).toBe('AA-112-AA');
+      expect(normalizePlateText('B112AA')?.plateNumber).toBe('AA-112-AA');
+      expect(normalizePlateText('I112AA')?.plateNumber).toBe('AA-112-AA');
+      expect(normalizePlateText('1112AA')?.plateNumber).toBe('AA-112-AA');
+      expect(normalizePlateText('8112AA')?.plateNumber).toBe('AA-112-AA');
+      expect(normalizePlateText('BA112AA')?.plateNumber).toBe('AA-112-AA');
+    });
+
+    it('should reject pure-letter background wall words (e.g. TTASTHE, NETSYSTEME, VIDEOSURVEILLANCE, TEEEVI)', () => {
+      expect(normalizePlateText('TTASTHE')).toBeNull();
+      expect(normalizePlateText('NETSYSTEME')).toBeNull();
+      expect(normalizePlateText('VIDEOSURVEILLANCE')).toBeNull();
+      expect(normalizePlateText('SECURITE INFORMATIQUE')).toBeNull();
+      expect(normalizePlateText('TEEEVI')).toBeNull();
+      expect(normalizePlateText('BNSIIEA')).toBeNull();
+      expect(normalizePlateText('IIEEEE')).toBeNull();
+      expect(normalizePlateText('LEETEHE')).toBeNull();
+    });
   });
 });

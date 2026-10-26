@@ -424,10 +424,15 @@ class AIVisionService {
 
       if (vehiclePreds.length > 0) {
         vehiclePreds.sort((a: any, b: any) => b.score - a.score);
-        const best = vehiclePreds[0];
+        let best = vehiclePreds[0];
+        // Prevent close-up car grilles from being misclassified as low-confidence 'bus' or 'truck' (< 68%)
+        if ((best.class === 'bus' || best.class === 'truck') && best.score < 0.68) {
+          const carPred = vehiclePreds.find((p: any) => p.class === 'car');
+          best = carPred || { ...best, class: 'car', score: Math.max(best.score, 0.85) };
+        }
         const res = this.mapObjectToCategory(best.class, best.score, best.bbox, canvas.width, ctx, liveSnapshot);
 
-        if (!this.lockedVehicleSnapshot && res.confidence >= 50) {
+        if (!this.lockedVehicleSnapshot && res.confidence >= 65) {
           this.lockedVehicleSnapshot = liveSnapshot;
           this.lockedVehicleCategory = {
             categoryCode: res.categoryCode,

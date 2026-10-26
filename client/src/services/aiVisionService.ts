@@ -445,7 +445,13 @@ class AIVisionService {
           console.log('[AI Vision Canvas] 🔒 Gel automatique véhicule réussi:', res.categoryCode, res.categoryLabel);
         }
 
-        this.triggerBackgroundOcr(canvas, best.bbox);
+        const safeBbox: [number, number, number, number] = [
+          Math.max(Math.round(canvas.width * 0.06), Math.round(best.bbox[0])),
+          Math.max(Math.round(canvas.height * 0.14), Math.round(best.bbox[1])),
+          Math.min(Math.round(canvas.width * 0.88), Math.round(best.bbox[2])),
+          Math.min(Math.round(canvas.height * 0.74), Math.round(best.bbox[3]))
+        ];
+        this.triggerBackgroundOcr(canvas, safeBbox);
 
         const activePlate = this.getEffectivePlate();
         return {
@@ -460,7 +466,13 @@ class AIVisionService {
         };
       }
 
-      this.triggerBackgroundOcr(canvas);
+      const defaultSafeReticle: [number, number, number, number] = [
+        Math.round(canvas.width * 0.08),
+        Math.round(canvas.height * 0.14),
+        Math.round(canvas.width * 0.84),
+        Math.round(canvas.height * 0.74)
+      ];
+      this.triggerBackgroundOcr(canvas, defaultSafeReticle);
       const activePlate = this.getEffectivePlate();
 
       if (this.lockedVehicleCategory || activePlate) {

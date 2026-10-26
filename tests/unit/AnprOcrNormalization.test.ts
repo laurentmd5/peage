@@ -154,6 +154,8 @@ describe('ANPR / LAPI OCR Plate Normalization & Grammar Correction', () => {
       expect(normalizePlateText('BNSIIEA')).toBeNull();
       expect(normalizePlateText('IIEEEE')).toBeNull();
       expect(normalizePlateText('LEETEHE')).toBeNull();
+      expect(normalizePlateText('2028 MC')).toBeNull();
+      expect(normalizePlateText('10-26-2026 Mon 12:48:32')).toBeNull();
     });
   });
 });

@@ -50,8 +50,9 @@ class AnprOcrService {
   }
 
   /**
-   * Searches for a high-luminance horizontal plate cluster with high horizontal character edge density
-   * Prevents dark car grilles, horizontal chrome slats, and bumpers from contaminating the plate bounding box
+   * 2D Integral-Image White-Plate + Black-Character Island Detector
+   * Locates the compact license plate rectangle (e.g. AA-112-AA) anywhere inside (rx, ry, rw, rh)
+   * Ignores dark grilles/rings (low white ratio) and blank white walls (zero character edges)
    */
   findPlateSubcrop(
     sourceCanvas: HTMLCanvasElement,
@@ -71,120 +72,123 @@ class AnprOcrService {
       ctx.drawImage(sourceCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
       const data = ctx.getImageData(0, 0, rw, rh).data;
 
-      // 1. Primary detector: Horizontal character edge-transition density + bright plate island
-      // Focus horizontal scan on central 22%..86% width (excludes background wall text on far left/right)
-      const rowBright = new Int32Array(rh);
-      const rowTransitions = new Int32Array(rh);
-      const xStartScan = Math.round(rw * 0.22);
-      const xEndScan = Math.round(rw * 0.86);
+      // Build 2D Integral Images for:
+      // 1) Neutral bright plate pixels (intWhite)
+      // 2) Sharp dark-character-to-white-plate horizontal transitions (intEdge)
+      const stride = rw + 1;
+      const intWhite = new Int32Array((rh + 1) * stride);
+      const intEdge = new Int32Array((rh + 1) * stride);
+      const lumRow = new Uint8Array(rw);
 
       for (let y = 0; y < rh; y++) {
-        let prevLum = -1;
-        for (let x = xStartScan; x <= xEndScan; x++) {
+        let rowW = 0;
+        let rowE = 0;
+        const yOff = (y + 1) * stride;
+        const prevYOff = y * stride;
+
+        for (let x = 0; x < rw; x++) {
           const idx = (y * rw + x) * 4;
-          const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-          if (lum > 145) rowBright[y]++;
-          if (prevLum !== -1 && Math.abs(lum - prevLum) > 38) {
-            rowTransitions[y]++;
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+          const lum = (r * 77 + g * 150 + b * 29) >> 8;
+          lumRow[x] = lum;
+
+          const maxC = Math.max(r, g, b);
+          const minC = Math.min(r, g, b);
+          const isWhitePlateBg = lum > 125 && (maxC - minC) < 50 ? 1 : 0;
+
+          let isCharStrokeEdge = 0;
+          if (x >= 2) {
+            const prevL = lumRow[x - 2];
+            const diff = Math.abs(lum - prevL);
+            const minL = Math.min(lum, prevL);
+            const maxL = Math.max(lum, prevL);
+            // Direct horizontal transition between dark character stroke (< 108) and bright plate (> 120)
+            if (diff > 34 && minL < 108 && maxL > 120) {
+              isCharStrokeEdge = 1;
+            }
           }
-          prevLum = lum;
+
+          rowW += isWhitePlateBg;
+          rowE += isCharStrokeEdge;
+          intWhite[yOff + x + 1] = intWhite[prevYOff + x + 1] + rowW;
+          intEdge[yOff + x + 1] = intEdge[prevYOff + x + 1] + rowE;
         }
       }
 
-      // Find vertical band with high character transition density AND bright plate background
-      let bestTransStartY = -1;
-      let bestTransEndY = -1;
-      let maxTransScore = 0;
-      let curTransStart = -1;
-      let curTransScore = 0;
+      const rectSum = (integral: Int32Array, x1: number, y1: number, x2: number, y2: number): number => {
+        return (
+          integral[y2 * stride + x2] -
+          integral[y1 * stride + x2] -
+          integral[y2 * stride + x1] +
+          integral[y1 * stride + x1]
+        );
+      };
 
-      for (let y = 0; y < rh; y++) {
-        const isPlateRow = rowTransitions[y] >= 6 && rowBright[y] > (xEndScan - xStartScan) * 0.10;
-        if (isPlateRow) {
-          if (curTransStart === -1) curTransStart = y;
-          curTransScore += rowTransitions[y];
-          const runLen = y - curTransStart + 1;
-          if (runLen >= 10 && runLen <= rh * 0.38 && curTransScore > maxTransScore) {
-            maxTransScore = curTransScore;
-            bestTransStartY = curTransStart;
-            bestTransEndY = y;
+      // Multi-scale 2D sliding window search for the white-plate + black-characters island
+      const xMinSearch = Math.round(rw * 0.14);
+      const xMaxSearch = Math.round(rw * 0.88);
+      const yMinSearch = Math.round(rh * 0.06);
+      const yMaxSearch = Math.round(rh * 0.94);
+
+      const widthFractions = [0.18, 0.25, 0.35, 0.48];
+      const aspectRatios = [2.6, 3.4];
+
+      let bestScore = 0;
+      let bestBox: { x: number; y: number; w: number; h: number } | null = null;
+
+      for (const wf of widthFractions) {
+        const ww = Math.max(64, Math.round(rw * wf));
+        for (const ar of aspectRatios) {
+          const wh = Math.max(22, Math.round(ww / ar));
+          if (wh > rh * 0.45) continue;
+
+          const stepX = Math.max(6, Math.round(ww * 0.12));
+          const stepY = Math.max(4, Math.round(wh * 0.15));
+          const area = ww * wh;
+
+          for (let wy = yMinSearch; wy + wh <= yMaxSearch; wy += stepY) {
+            for (let wx = xMinSearch; wx + ww <= xMaxSearch; wx += stepX) {
+              const whiteCount = rectSum(intWhite, wx, wy, wx + ww, wy + wh);
+              const whiteRatio = whiteCount / area;
+              // Must have substantial white plate background (26%..86%), rejecting dark grilles (<26%) and blank walls (>86%)
+              if (whiteRatio < 0.26 || whiteRatio > 0.86) continue;
+
+              const edgeCount = rectSum(intEdge, wx, wy, wx + ww, wy + wh);
+              const edgeRatio = edgeCount / area;
+              if (edgeRatio < 0.032) continue;
+
+              // Normalize density score so compact tight windows around AA-112-AA beat oversized windows
+              const score = (edgeRatio * 100) * Math.min(1.0, whiteRatio * 1.8) * Math.pow(area, 0.15);
+              if (score > bestScore) {
+                bestScore = score;
+                bestBox = { x: wx, y: wy, w: ww, h: wh };
+              }
+            }
           }
-        } else {
-          curTransStart = -1;
-          curTransScore = 0;
         }
       }
 
-      if (bestTransStartY !== -1 && (bestTransEndY - bestTransStartY) >= 10) {
-        const bandH = bestTransEndY - bestTransStartY;
-        // Count ONLY actual horizontal character edge transitions per column (ignores flat white walls!)
-        const colEdges = new Int32Array(rw);
-        for (let y = bestTransStartY; y <= bestTransEndY; y++) {
-          for (let x = xStartScan; x <= xEndScan; x++) {
-            const idx = (y * rw + x) * 4;
-            const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-            const prevIdx = (y * rw + (x - 2)) * 4;
-            const prevL = 0.299 * data[prevIdx] + 0.587 * data[prevIdx + 1] + 0.114 * data[prevIdx + 2];
-            if (Math.abs(lum - prevL) > 36) {
-              colEdges[x]++;
-            }
-          }
-        }
-
-        // Find the strongest contiguous horizontal cluster of character edges (bridging inter-character spaces up to 4% of rw)
-        const maxGap = Math.max(8, Math.round(rw * 0.04));
-        let bestClusterX1 = -1;
-        let bestClusterX2 = -1;
-        let bestClusterScore = 0;
-        let curX1 = -1;
-        let curX2 = -1;
-        let curScore = 0;
-        let gapCount = 0;
-
-        for (let x = xStartScan; x <= xEndScan; x++) {
-          if (colEdges[x] >= Math.max(2, Math.round(bandH * 0.12))) {
-            if (curX1 === -1) curX1 = x;
-            curX2 = x;
-            curScore += colEdges[x];
-            gapCount = 0;
-            if (curScore > bestClusterScore) {
-              bestClusterScore = curScore;
-              bestClusterX1 = curX1;
-              bestClusterX2 = curX2;
-            }
-          } else if (curX1 !== -1) {
-            gapCount++;
-            if (gapCount > maxGap) {
-              curX1 = -1;
-              curX2 = -1;
-              curScore = 0;
-              gapCount = 0;
-            }
-          }
-        }
-
-        const candW = bestClusterX2 - bestClusterX1;
-        if (bestClusterX1 !== -1 && candW >= 50 && candW <= rw * 0.65 && candW > bandH * 1.3) {
-          const padX = Math.round(candW * 0.12);
-          const padY = Math.round(bandH * 0.35);
-          const px = Math.max(0, bestClusterX1 - padX);
-          const py = Math.max(0, bestTransStartY - padY);
-          const pw = Math.min(rw - px, candW + padX * 2);
-          const ph = Math.min(rh - py, bandH + padY * 2);
-          return { x: rx + px, y: ry + py, w: pw, h: ph };
-        }
+      if (bestBox) {
+        const padX = Math.round(bestBox.w * 0.12);
+        const padY = Math.round(bestBox.h * 0.25);
+        const px = Math.max(0, bestBox.x - padX);
+        const py = Math.max(0, bestBox.y - padY);
+        const pw = Math.min(rw - px, bestBox.w + padX * 2);
+        const ph = Math.min(rh - py, bestBox.h + padY * 2);
+        return { x: rx + px, y: ry + py, w: pw, h: ph };
       }
     } catch {
       // Fallback on error
     }
 
-    // Default targeted vehicle plate region (central zone covering upper-mid and mid bumper where AA-112-AA sits)
     if (rh > 80 && rw > 120) {
       return {
-        x: rx + Math.round(rw * 0.25),
-        y: ry + Math.round(rh * 0.12),
-        w: Math.round(rw * 0.52),
-        h: Math.round(rh * 0.36)
+        x: rx + Math.round(rw * 0.20),
+        y: ry + Math.round(rh * 0.25),
+        w: Math.round(rw * 0.60),
+        h: Math.round(rh * 0.50)
       };
     }
 
@@ -202,7 +206,8 @@ class AnprOcrService {
     cropY: number,
     cropW: number,
     cropH: number,
-    mode: 'adaptive' | 'otsu' = 'adaptive'
+    mode: 'adaptive' | 'otsu' = 'adaptive',
+    tiltDeg = 0
   ): HTMLCanvasElement {
     const scale = Math.max(1.8, Math.min(3.5, 320 / Math.max(1, cropW)));
     const targetW = Math.max(220, Math.round(cropW * scale));
@@ -214,9 +219,19 @@ class AnprOcrService {
     const tCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
     if (!tCtx) return tempCanvas;
 
+    tCtx.fillStyle = '#ffffff';
+    tCtx.fillRect(0, 0, targetW, targetH);
     tCtx.imageSmoothingEnabled = true;
     tCtx.imageSmoothingQuality = 'high';
-    tCtx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+    if (tiltDeg !== 0) {
+      tCtx.save();
+      tCtx.translate(targetW / 2, targetH / 2);
+      tCtx.rotate((tiltDeg * Math.PI) / 180);
+      tCtx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, -targetW / 2, -targetH / 2, targetW, targetH);
+      tCtx.restore();
+    } else {
+      tCtx.drawImage(sourceCanvas, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+    }
 
     const imgData = tCtx.getImageData(0, 0, targetW, targetH);
     const data = imgData.data;
@@ -509,15 +524,18 @@ class AnprOcrService {
 
       // Handle standalone HTMLCanvasElement directly
       if (source instanceof HTMLCanvasElement) {
-        const cropX = bbox ? Math.max(0, bbox[0]) : 0;
-        const cropY = bbox ? Math.max(0, bbox[1]) : 0;
-        const cropW = bbox ? Math.min(width - cropX, bbox[2]) : width;
-        const cropH = bbox ? Math.min(height - cropY, bbox[3]) : height;
+        // Always exclude top 14% (Hikvision OSD timestamp e.g. "10-26-2026 Mon") and bottom 12% (OSD camera name) on full camera frames
+        const minSafeY = height >= 240 ? Math.round(height * 0.14) : 0;
+        const maxSafeY = height >= 240 ? Math.round(height * 0.88) : height;
+        const cropX = bbox ? Math.max(0, bbox[0]) : Math.round(width * 0.06);
+        const cropY = bbox ? Math.max(minSafeY, bbox[1]) : minSafeY;
+        const cropW = bbox ? Math.min(width - cropX, bbox[2]) : Math.round(width * 0.88);
+        const cropH = bbox ? Math.min(maxSafeY - cropY, bbox[3]) : (maxSafeY - cropY);
 
         const plateCrop = this.findPlateSubcrop(srcCanvas, cropX, cropY, cropW, cropH);
 
-        // Pass 1: Adaptive binarization on targeted plate subcrop
-        const canvasAdapt = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'adaptive');
+        // Pass 1: Adaptive binarization on targeted plate subcrop (0° horizontal)
+        const canvasAdapt = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'adaptive', 0);
         const resAdapt = await this.worker.recognize(canvasAdapt);
         const rawAdapt = resAdapt.data.text ? resAdapt.data.text.trim() : '';
         const normAdapt = rawAdapt ? normalizePlateText(rawAdapt) : null;
@@ -529,9 +547,9 @@ class AnprOcrService {
           };
         }
 
-        // Pass 2: Perspective Deskew (+9° and -9°) for 3/4 angled toll lane cameras (like tilted AA-112-AA)
-        for (const tiltAngle of [9, -9] as const) {
-          const deskewed = this.rotateCanvas(canvasAdapt, tiltAngle);
+        // Pass 2: Pre-binarization Perspective Deskew (+11°, +15°, -11°) for 3/4 angled toll lane cameras (like tilted AA-112-AA)
+        for (const tiltAngle of [11, 15, -11] as const) {
+          const deskewed = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'adaptive', tiltAngle);
           const resDeskew = await this.worker.recognize(deskewed);
           const rawDeskew = resDeskew.data.text ? resDeskew.data.text.trim() : '';
           const normDeskew = rawDeskew ? normalizePlateText(rawDeskew) : null;
@@ -544,34 +562,37 @@ class AnprOcrService {
           }
         }
 
-        // Pass 3: Otsu binarization on targeted plate subcrop
-        const canvasOtsu = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'otsu');
-        const resOtsu = await this.worker.recognize(canvasOtsu);
-        const rawOtsu = resOtsu.data.text ? resOtsu.data.text.trim() : '';
-        const normOtsu = rawOtsu ? normalizePlateText(rawOtsu) : null;
-        if (normOtsu) {
-          return {
-            ...normOtsu,
-            rawText: rawOtsu,
-            processedImageCrop: canvasOtsu.toDataURL('image/jpeg', 0.85)
-          };
+        // Pass 3: Otsu binarization on targeted plate subcrop (0° and +11°)
+        for (const tiltAngle of [0, 11] as const) {
+          const canvasOtsu = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'otsu', tiltAngle);
+          const resOtsu = await this.worker.recognize(canvasOtsu);
+          const rawOtsu = resOtsu.data.text ? resOtsu.data.text.trim() : '';
+          const normOtsu = rawOtsu ? normalizePlateText(rawOtsu) : null;
+          if (normOtsu) {
+            return {
+              ...normOtsu,
+              rawText: rawOtsu,
+              processedImageCrop: canvasOtsu.toDataURL('image/jpeg', 0.85)
+            };
+          }
         }
 
-        // Pass 4: Fallback to central plate zone if plateCrop differed
-        if (plateCrop.w !== cropW || plateCrop.h !== cropH) {
-          const midX = cropX + Math.round(cropW * 0.22);
-          const midY = cropY + Math.round(cropH * 0.12);
-          const midW = Math.round(cropW * 0.56);
-          const midH = Math.round(cropH * 0.42);
-          const midAdapt = this.preprocessPlateImage(srcCanvas, midX, midY, midW, midH, 'adaptive');
-          const resMid = await this.worker.recognize(midAdapt);
-          const rawMid = resMid.data.text ? resMid.data.text.trim() : '';
-          const normMid = rawMid ? normalizePlateText(rawMid) : null;
-          if (normMid) {
+        // Pass 4: Multi-zone fallback (Upper-Mid Bumper & Lower-Mid Bumper) if plateCrop missed
+        const zones = [
+          { x: cropX + Math.round(cropW * 0.20), y: cropY + Math.round(cropH * 0.45), w: Math.round(cropW * 0.55), h: Math.round(cropH * 0.45) },
+          { x: cropX + Math.round(cropW * 0.22), y: cropY + Math.round(cropH * 0.10), w: Math.round(cropW * 0.55), h: Math.round(cropH * 0.42) }
+        ];
+        for (const z of zones) {
+          const zSub = this.findPlateSubcrop(srcCanvas, z.x, z.y, z.w, z.h);
+          const zAdapt = this.preprocessPlateImage(srcCanvas, zSub.x, zSub.y, zSub.w, zSub.h, 'adaptive', 11);
+          const resZ = await this.worker.recognize(zAdapt);
+          const rawZ = resZ.data.text ? resZ.data.text.trim() : '';
+          const normZ = rawZ ? normalizePlateText(rawZ) : null;
+          if (normZ) {
             return {
-              ...normMid,
-              rawText: rawMid,
-              processedImageCrop: midAdapt.toDataURL('image/jpeg', 0.85)
+              ...normZ,
+              rawText: rawZ,
+              processedImageCrop: zAdapt.toDataURL('image/jpeg', 0.85)
             };
           }
         }
@@ -605,16 +626,16 @@ class AnprOcrService {
       const plateCrop1 = this.findPlateSubcrop(srcCanvas, reticleX, reticleY, reticleW, reticleH);
 
       // Try Bradley Adaptive on Candidate 1
-      const adaptCanvas1 = this.preprocessPlateImage(srcCanvas, plateCrop1.x, plateCrop1.y, plateCrop1.w, plateCrop1.h, 'adaptive');
+      const adaptCanvas1 = this.preprocessPlateImage(srcCanvas, plateCrop1.x, plateCrop1.y, plateCrop1.w, plateCrop1.h, 'adaptive', 0);
       let result = await this.worker.recognize(adaptCanvas1);
       let rawText = result.data.text ? result.data.text.trim() : '';
       let normalized = rawText ? normalizePlateText(rawText) : null;
       let activeCanvas = adaptCanvas1;
 
-      // Try Deskew (+9° / -9°) on Candidate 1
+      // Try Pre-binarization Deskew (+11° / -11°) on Candidate 1
       if (!normalized) {
-        for (const tiltAngle of [9, -9] as const) {
-          const deskewCanvas1 = this.rotateCanvas(adaptCanvas1, tiltAngle);
+        for (const tiltAngle of [11, -11] as const) {
+          const deskewCanvas1 = this.preprocessPlateImage(srcCanvas, plateCrop1.x, plateCrop1.y, plateCrop1.w, plateCrop1.h, 'adaptive', tiltAngle);
           const resDeskew1 = await this.worker.recognize(deskewCanvas1);
           const rawDeskew1 = resDeskew1.data.text ? resDeskew1.data.text.trim() : '';
           const normDeskew1 = rawDeskew1 ? normalizePlateText(rawDeskew1) : null;
@@ -876,17 +897,21 @@ function parseSinglePlateCandidate(clean: string): {
   }
 
   // 4. Unprefixed Guinea-Bissau: strictly 4 REAL digits + 2 letters (e.g. 4512 AZ -> GB-4512-AZ)
-  // Requires 4 real digits so 6-char clipped SIV plates (like A112AA or B112AA) are never misclassified as GB-XXXX-YY
+  // Requires 4 real digits and rejects camera OSD timestamps/years (e.g. "2026 Mon" -> "2028 MC")
   const genMatch = clean.match(/^([0-9]{4})([A-Z]{2})$/);
   if (genMatch) {
     const rawDigits = genMatch[1];
     const rawLetters = genMatch[2];
-    return {
-      plateNumber: `GB-${rawDigits}-${rawLetters}`,
-      confidence: 90,
-      country: 'GW',
-      countryLabel: '🇬🇼 Guinée-Bissau'
-    };
+    const isOsdYearOrDate = /^20[123]\d$/.test(rawDigits) || /^19\d\d$/.test(rawDigits) || /^(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(rawDigits);
+    const isOsdDayCode = /^(MO|TU|WE|TH|FR|SA|SU|MC|AM|PM)$/.test(rawLetters);
+    if (!isOsdYearOrDate && !isOsdDayCode) {
+      return {
+        plateNumber: `GB-${rawDigits}-${rawLetters}`,
+        confidence: 90,
+        country: 'GW',
+        countryLabel: '🇬🇼 Guinée-Bissau'
+      };
+    }
   }
 
   return null;

@@ -559,7 +559,8 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     setIsTestingHikvision(true);
     setCameraStatusMsg(null);
     try {
-      const plateNumber = preset?.plate || 'AA-331-CM';
+      const plateNumber = preset?.plate || '';
+      if (!plateNumber) return;
       const vehicleType = preset?.vehicleType || 'SUV';
       const res = await api.simulateHikvisionWebhook({
         laneId: selectedLane,
@@ -1244,8 +1245,8 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                   setHikvisionPlateInput(e.target.value.toUpperCase());
                                   setIsHikvisionPlateEdited(true);
                                 }}
-                                placeholder="AA-331-CM"
-                                className="bg-slate-950 border border-emerald-500/60 text-white font-mono font-black text-sm px-2.5 py-1 rounded-lg uppercase tracking-wider w-36 focus:ring-2 focus:ring-emerald-400 focus:outline-none"
+                                placeholder="-- Non lue --"
+                                className="bg-slate-950 border border-emerald-500/60 text-white font-mono font-black text-sm px-2.5 py-1 rounded-lg uppercase tracking-wider w-40 placeholder:text-slate-600 placeholder:font-normal placeholder:text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none"
                               />
                               <button
                                 type="button"

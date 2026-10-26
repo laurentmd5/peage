@@ -360,6 +360,28 @@ class AnprOcrService {
   }
 
   /**
+   * Rotate a canvas by 90, 180, or 270 degrees
+   * Used for auto-correcting cameras or test videos mounted on their sides (portrait vs landscape)
+   */
+  rotateCanvas(src: HTMLCanvasElement, degrees: 90 | 180 | 270): HTMLCanvasElement {
+    const dest = document.createElement('canvas');
+    const rad = (degrees * Math.PI) / 180;
+    if (degrees === 90 || degrees === 270) {
+      dest.width = src.height;
+      dest.height = src.width;
+    } else {
+      dest.width = src.width;
+      dest.height = src.height;
+    }
+    const ctx = dest.getContext('2d');
+    if (!ctx) return src;
+    ctx.translate(dest.width / 2, dest.height / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(src, -src.width / 2, -src.height / 2);
+    return dest;
+  }
+
+  /**
    * Recognize license plate text from a video element or canvas within a bounding box
    */
   async recognizePlate(
@@ -455,6 +477,23 @@ class AnprOcrService {
           }
         }
 
+        // Pass 5: Multi-Orientation Auto-Rotation (90° and 270°)
+        // Crucial when the camera stream or smartphone is oriented vertically on its side
+        for (const angle of [90, 270] as const) {
+          const rotCanvas = this.rotateCanvas(canvasAdapt, angle);
+          const resRot = await this.worker.recognize(rotCanvas);
+          const rawRot = resRot.data.text ? resRot.data.text.trim() : '';
+          const normRot = rawRot ? normalizePlateText(rawRot) : null;
+          if (normRot) {
+            console.log(`[ANPR OCR] 🔄 Plaque détectée avec rotation automatique ${angle}°:`, normRot.plateNumber);
+            return {
+              ...normRot,
+              rawText: rawRot,
+              processedImageCrop: rotCanvas.toDataURL('image/jpeg', 0.85)
+            };
+          }
+        }
+
         return null;
       }
 
@@ -517,6 +556,24 @@ class AnprOcrService {
             rawText = rawOtsu2;
             normalized = normOtsu2;
             activeCanvas = otsuCanvas2;
+          }
+        }
+      }
+
+      // Candidate 3: Multi-orientation rotation on reticle
+      if (!normalized) {
+        for (const angle of [90, 270] as const) {
+          const rotCanvas = this.rotateCanvas(adaptCanvas1, angle);
+          const resRot = await this.worker.recognize(rotCanvas);
+          const rawRot = resRot.data.text ? resRot.data.text.trim() : '';
+          const normRot = rawRot ? normalizePlateText(rawRot) : null;
+          if (normRot) {
+            console.log(`[ANPR OCR Video] 🔄 Plaque détectée avec rotation ${angle}°:`, normRot.plateNumber);
+            result = resRot;
+            rawText = rawRot;
+            normalized = normRot;
+            activeCanvas = rotCanvas;
+            break;
           }
         }
       }

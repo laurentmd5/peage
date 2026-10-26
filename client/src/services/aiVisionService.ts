@@ -185,7 +185,37 @@ class AIVisionService {
    */
   unlockPlate(): void {
     this.lockedPlate = null;
+    this.lastOcrPlate = null;
+    this.lastOcrCrop = null;
+    this.lastOcrCountryLabel = null;
     this.ocrRollingBuffer = [];
+    this.isOcrBusy = false;
+    this.lastOcrTimestamp = 0;
+  }
+
+  /**
+   * Forces an immediate plate OCR scan on the given video or canvas element
+   */
+  async forceRescanPlate(
+    source: HTMLVideoElement | HTMLCanvasElement,
+    bbox?: [number, number, number, number]
+  ): Promise<{ plateNumber: string; confidence: number; countryLabel?: string; processedImageCrop?: string } | null> {
+    this.unlockPlate();
+    try {
+      this.isOcrBusy = true;
+      const ocrResult = await anprOcrService.recognizePlate(source, bbox);
+      this.isOcrBusy = false;
+      this.lastOcrTimestamp = Date.now();
+      if (ocrResult && ocrResult.plateNumber) {
+        this.handleNewOcrResult(ocrResult);
+        return ocrResult;
+      }
+      return null;
+    } catch {
+      this.isOcrBusy = false;
+      this.lastOcrTimestamp = Date.now();
+      return null;
+    }
   }
 
   /**

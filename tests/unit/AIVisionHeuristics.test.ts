@@ -146,9 +146,10 @@ describe('AI Vision Edge Heuristics & Vehicle Classification Rules', () => {
       });
       expect(aiVisionService.getEffectivePlate()?.plateNumber).toBe('AB-093-FB');
 
-      // Unlocking plate clears lock
+      // Unlocking plate clears lock and cached lastOcrPlate so getEffectivePlate returns null
       aiVisionService.unlockPlate();
       expect(aiVisionService.isPlateReadingLocked()).toBe(false);
+      expect(aiVisionService.getEffectivePlate()).toBeNull();
     });
   });
 });

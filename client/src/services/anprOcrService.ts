@@ -33,7 +33,7 @@ class AnprOcrService {
         const worker = await createWorker('eng');
         await worker.setParameters({
           tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789- ',
-          tessedit_pageseg_mode: '7' as any // Treat image as a single text line (ideal for license plates)
+          tessedit_pageseg_mode: '6' as any // Single uniform block of text (prevents vertical squashing on tall crops)
         });
         this.worker = worker;
         this.isInitializing = false;
@@ -50,8 +50,8 @@ class AnprOcrService {
   }
 
   /**
-   * Searches for a high-luminance horizontal plate cluster within a candidate region
-   * Prevents dark car grilles and bumpers from contaminating the plate bounding box
+   * Searches for a high-luminance horizontal plate cluster with high horizontal character edge density
+   * Prevents dark car grilles, horizontal chrome slats, and bumpers from contaminating the plate bounding box
    */
   findPlateSubcrop(
     sourceCanvas: HTMLCanvasElement,
@@ -66,20 +66,95 @@ class AnprOcrService {
       const c = document.createElement('canvas');
       c.width = rw;
       c.height = rh;
-      const ctx = c.getContext('2d');
+      const ctx = c.getContext('2d', { willReadFrequently: true });
       if (!ctx) return { x: rx, y: ry, w: rw, h: rh };
       ctx.drawImage(sourceCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
       const data = ctx.getImageData(0, 0, rw, rh).data;
 
+      // 1. Primary detector: Horizontal character edge-transition density + bright background
+      // License plate text (e.g. AA-112-AA) creates 10..28 sharp horizontal dark<->bright transitions per row,
+      // whereas horizontal radiator grille slats have almost zero horizontal transitions.
       const rowBright = new Int32Array(rh);
+      const rowTransitions = new Int32Array(rh);
+      const xStartScan = Math.round(rw * 0.08);
+      const xEndScan = Math.round(rw * 0.92);
+
       for (let y = 0; y < rh; y++) {
+        let prevLum = -1;
         for (let x = 0; x < rw; x++) {
           const idx = (y * rw + x) * 4;
           const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-          if (lum > 155) rowBright[y]++;
+          if (lum > 150) rowBright[y]++;
+          if (x >= xStartScan && x <= xEndScan) {
+            if (prevLum !== -1 && Math.abs(lum - prevLum) > 38) {
+              rowTransitions[y]++;
+            }
+            prevLum = lum;
+          }
         }
       }
 
+      // Find vertical band with high character transition density AND bright plate background
+      let bestTransStartY = -1;
+      let bestTransEndY = -1;
+      let maxTransScore = 0;
+      let curTransStart = -1;
+      let curTransScore = 0;
+
+      for (let y = 0; y < rh; y++) {
+        const isPlateRow = rowTransitions[y] >= 8 && rowBright[y] > rw * 0.10;
+        if (isPlateRow) {
+          if (curTransStart === -1) curTransStart = y;
+          curTransScore += rowTransitions[y];
+          const runLen = y - curTransStart + 1;
+          if (runLen >= 10 && runLen <= rh * 0.35 && curTransScore > maxTransScore) {
+            maxTransScore = curTransScore;
+            bestTransStartY = curTransStart;
+            bestTransEndY = y;
+          }
+        } else {
+          curTransStart = -1;
+          curTransScore = 0;
+        }
+      }
+
+      if (bestTransStartY !== -1 && (bestTransEndY - bestTransStartY) >= 10) {
+        const bandH = bestTransEndY - bestTransStartY;
+        const colActivity = new Int32Array(rw);
+        for (let y = bestTransStartY; y <= bestTransEndY; y++) {
+          for (let x = 2; x < rw - 2; x++) {
+            const idx = (y * rw + x) * 4;
+            const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+            const prevIdx = (y * rw + (x - 2)) * 4;
+            const prevL = 0.299 * data[prevIdx] + 0.587 * data[prevIdx + 1] + 0.114 * data[prevIdx + 2];
+            if (lum > 150 || Math.abs(lum - prevL) > 38) {
+              colActivity[x]++;
+            }
+          }
+        }
+
+        let minX = rw;
+        let maxX = 0;
+        for (let x = 0; x < rw; x++) {
+          if (colActivity[x] > bandH * 0.25) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+          }
+        }
+
+        const candW = maxX - minX;
+        if (candW >= 55 && candW > bandH * 1.5) {
+          const padX = Math.round(candW * 0.08);
+          const padY = Math.round(bandH * 0.28);
+          const px = Math.max(0, minX - padX);
+          const py = Math.max(0, bestTransStartY - padY);
+          const pw = Math.min(rw - px, candW + padX * 2);
+          const ph = Math.min(rh - py, bandH + padY * 2);
+          return { x: rx + px, y: ry + py, w: pw, h: ph };
+        }
+      }
+
+      // 2. Secondary detector: Contiguous bright horizontal band
       let bestStartY = -1;
       let bestEndY = -1;
       let maxRun = 0;
@@ -111,7 +186,7 @@ class AnprOcrService {
           for (let x = 0; x < rw; x++) {
             const idx = (y * rw + x) * 4;
             const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-            if (lum > 155) colBright[x]++;
+            if (lum > 150) colBright[x]++;
           }
         }
 
@@ -126,10 +201,8 @@ class AnprOcrService {
 
         const candidateW = maxX - minX;
         const candidateH = bestEndY - bestStartY;
-        // Verify realistic aspect ratio & min dimensions for a vehicle license plate
-        // Height cannot exceed 40% of vehicle height (avoids capturing entire white truck body)
-        if (candidateW >= 60 && candidateH >= 14 && candidateH <= rh * 0.40 && candidateW > candidateH * 1.3) {
-          const padX = Math.round(candidateW * 0.05);
+        if (candidateW >= 60 && candidateH >= 14 && candidateH <= rh * 0.35 && candidateW > candidateH * 1.6) {
+          const padX = Math.round(candidateW * 0.06);
           const px = Math.max(0, minX - padX);
           const pw = Math.min(rw - px, candidateW + padX * 2);
           return { x: rx + px, y: ry + py, w: pw, h: ph };
@@ -139,13 +212,13 @@ class AnprOcrService {
       // Fallback on error
     }
 
-    // Default targeted vehicle plate zone (central lower bumper where 95% of plates sit)
+    // Default targeted vehicle plate strip (~3.8:1 aspect ratio in central lower bumper)
     if (rh > 80 && rw > 120) {
       return {
-        x: rx + Math.round(rw * 0.15),
-        y: ry + Math.round(rh * 0.30),
-        w: Math.round(rw * 0.70),
-        h: Math.round(rh * 0.40)
+        x: rx + Math.round(rw * 0.20),
+        y: ry + Math.round(rh * 0.36),
+        w: Math.round(rw * 0.60),
+        h: Math.round(rh * 0.26)
       };
     }
 
@@ -172,7 +245,7 @@ class AnprOcrService {
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = targetW;
     tempCanvas.height = targetH;
-    const tCtx = tempCanvas.getContext('2d');
+    const tCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
     if (!tCtx) return tempCanvas;
 
     tCtx.imageSmoothingEnabled = true;
@@ -192,7 +265,7 @@ class AnprOcrService {
     const outCanvas = document.createElement('canvas');
     outCanvas.width = targetW + margin * 2;
     outCanvas.height = targetH + margin * 2;
-    const outCtx = outCanvas.getContext('2d');
+    const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
     if (!outCtx) return tempCanvas;
 
     outCtx.fillStyle = '#ffffff';
@@ -425,7 +498,7 @@ class AnprOcrService {
       srcCanvas.width = width;
       srcCanvas.height = height;
 
-      const sCtx = srcCanvas.getContext('2d');
+      const sCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
       if (!sCtx) return null;
       sCtx.drawImage(source, 0, 0);
 
@@ -438,7 +511,7 @@ class AnprOcrService {
 
         const plateCrop = this.findPlateSubcrop(srcCanvas, cropX, cropY, cropW, cropH);
 
-        // Pass 1: Adaptive binarization
+        // Pass 1: Adaptive binarization on targeted plate subcrop
         const canvasAdapt = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'adaptive');
         const resAdapt = await this.worker.recognize(canvasAdapt);
         const rawAdapt = resAdapt.data.text ? resAdapt.data.text.trim() : '';
@@ -451,7 +524,7 @@ class AnprOcrService {
           };
         }
 
-        // Pass 2: Otsu binarization
+        // Pass 2: Otsu binarization on targeted plate subcrop
         const canvasOtsu = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'otsu');
         const resOtsu = await this.worker.recognize(canvasOtsu);
         const rawOtsu = resOtsu.data.text ? resOtsu.data.text.trim() : '';
@@ -464,16 +537,18 @@ class AnprOcrService {
           };
         }
 
-        // Pass 3: Direct scaled crop
+        // Pass 3: Direct scaled crop with clean white margin
         const scale = 2.0;
         const directCanvas = document.createElement('canvas');
-        directCanvas.width = Math.round(plateCrop.w * scale);
-        directCanvas.height = Math.round(plateCrop.h * scale);
-        const dCtx = directCanvas.getContext('2d');
+        directCanvas.width = Math.round(plateCrop.w * scale) + 24;
+        directCanvas.height = Math.round(plateCrop.h * scale) + 24;
+        const dCtx = directCanvas.getContext('2d', { willReadFrequently: true });
         if (dCtx) {
+          dCtx.fillStyle = '#ffffff';
+          dCtx.fillRect(0, 0, directCanvas.width, directCanvas.height);
           dCtx.imageSmoothingEnabled = true;
           dCtx.imageSmoothingQuality = 'high';
-          dCtx.drawImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 0, 0, directCanvas.width, directCanvas.height);
+          dCtx.drawImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 12, 12, directCanvas.width - 24, directCanvas.height - 24);
           const resDirect = await this.worker.recognize(directCanvas);
           const rawDirect = resDirect.data.text ? resDirect.data.text.trim() : '';
           const normDirect = rawDirect ? normalizePlateText(rawDirect) : null;
@@ -502,7 +577,6 @@ class AnprOcrService {
         }
 
         // Pass 5: Multi-Orientation Auto-Rotation (90° and 270°)
-        // Crucial when the camera stream or smartphone is oriented vertically on its side
         for (const angle of [90, 270] as const) {
           const rotCanvas = this.rotateCanvas(canvasAdapt, angle);
           const resRot = await this.worker.recognize(rotCanvas);
@@ -521,7 +595,7 @@ class AnprOcrService {
         return null;
       }
 
-      // Handling HTMLVideoElement
+      // Handling HTMLVideoElement (Webcam Live Stream)
       // Candidate 1: Optical Central Reticle (Viseur LAPI [15%..85% width, 25%..75% height])
       const reticleX = Math.round(width * 0.15);
       const reticleY = Math.round(height * 0.25);
@@ -551,6 +625,20 @@ class AnprOcrService {
         }
       }
 
+      // Fallback on full optical reticle if subcrop missed a large hand-held plate/paper
+      if (!normalized && (plateCrop1.w !== reticleW || plateCrop1.h !== reticleH)) {
+        const fullReticleCanvas = this.preprocessPlateImage(srcCanvas, reticleX, reticleY, reticleW, reticleH, 'adaptive');
+        const resFull = await this.worker.recognize(fullReticleCanvas);
+        const rawFull = resFull.data.text ? resFull.data.text.trim() : '';
+        const normFull = rawFull ? normalizePlateText(rawFull) : null;
+        if (normFull) {
+          result = resFull;
+          rawText = rawFull;
+          normalized = normFull;
+          activeCanvas = fullReticleCanvas;
+        }
+      }
+
       // Candidate 2: Detected Vehicle Bounding Box
       if (!normalized && bbox) {
         const [vx, vy, vw, vh] = bbox;
@@ -570,17 +658,6 @@ class AnprOcrService {
           rawText = raw2;
           normalized = norm2;
           activeCanvas = adaptCanvas2;
-        } else {
-          const otsuCanvas2 = this.preprocessPlateImage(srcCanvas, plateCrop2.x, plateCrop2.y, plateCrop2.w, plateCrop2.h, 'otsu');
-          const resOtsu2 = await this.worker.recognize(otsuCanvas2);
-          const rawOtsu2 = resOtsu2.data.text ? resOtsu2.data.text.trim() : '';
-          const normOtsu2 = rawOtsu2 ? normalizePlateText(rawOtsu2) : null;
-          if (normOtsu2) {
-            result = resOtsu2;
-            rawText = rawOtsu2;
-            normalized = normOtsu2;
-            activeCanvas = otsuCanvas2;
-          }
         }
       }
 

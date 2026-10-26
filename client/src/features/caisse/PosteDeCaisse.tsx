@@ -377,10 +377,30 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     }
   }, [liveDetection?.isOcrLiveRead, liveDetection?.plateNumberSuggestion, liveDetection?.categoryCode, liveDetection?.fallbackPlate, isPlateManuallyEdited, webcamPlateInput]);
 
-  const handleUnlockPlate = () => {
+  const handleUnlockPlate = async () => {
     aiVisionService.unlockPlate();
     setWebcamPlateInput('');
     setIsPlateManuallyEdited(false);
+    setLiveDetection(prev => prev ? {
+      ...prev,
+      plateNumberSuggestion: '',
+      isOcrLiveRead: false,
+      isPlateLocked: false
+    } : null);
+
+    if (videoRef.current && !videoRef.current.paused && !videoRef.current.ended) {
+      const ocrRes = await aiVisionService.forceRescanPlate(videoRef.current);
+      if (ocrRes && ocrRes.plateNumber) {
+        setWebcamPlateInput(ocrRes.plateNumber);
+        setLiveDetection(prev => prev ? {
+          ...prev,
+          plateNumberSuggestion: ocrRes.plateNumber,
+          isOcrLiveRead: true,
+          isPlateLocked: aiVisionService.isPlateReadingLocked(),
+          ocrCountryLabel: ocrRes.countryLabel
+        } : null);
+      }
+    }
   };
 
   const handleUnlockVehicle = () => {
@@ -489,6 +509,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       if (forceFreshCapture) {
         const ocrResult = await anprOcrService.recognizePlate(canvas, [rx, ry, rw, rh]);
         if (ocrResult?.plateNumber) {
+          aiVisionService.handleNewOcrResult(ocrResult);
           detectedPlate = ocrResult.plateNumber;
           ocrConfidence = ocrResult.confidence;
           ocrCountryLabel = ocrResult.countryLabel || 'Auto';
@@ -910,10 +931,20 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                             </button>
                           </div>
                         ) : (
-                          <span className="text-amber-300 animate-pulse text-[9px] flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-                            <span>{language === 'fr' ? 'Centrer la plaque dans le viseur' : 'Center plate in viewfinder'}</span>
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-amber-300 animate-pulse text-[9px] flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
+                              <span>{language === 'fr' ? 'Centrer la plaque dans le viseur' : 'Center plate in viewfinder'}</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleUnlockPlate}
+                              title={language === 'fr' ? "Forcer la lecture de la plaque" : "Force plate scan"}
+                              className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 text-[9px] border border-amber-500/50 pointer-events-auto cursor-pointer"
+                            >
+                              {language === 'fr' ? '🔄 Relire' : '🔄 Rescan'}
+                            </button>
+                          </div>
                         )}
                       </div>
                       <div className={`flex justify-between text-[10px] font-mono transition-colors ${
@@ -945,7 +976,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                             <div className="text-[11px] text-emerald-400 font-mono font-bold flex flex-wrap items-center gap-2 mt-0.5">
                               <span>{language === 'fr' ? 'Tarif :' : 'Fee:'} {formatCurrency(liveDetection.tariff)} FCFA</span>
                             </div>
-                            <div className="flex items-center gap-2 mt-1">
+                            <div className="flex flex-wrap items-center gap-2 mt-1">
                               <span className="text-[11px] text-slate-300 font-mono font-bold">{t('plateLabel')} :</span>
                               <input
                                 type="text"
@@ -962,6 +993,15 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                     : 'border-slate-700 text-white focus:border-amber-400'
                                 }`}
                               />
+                              <button
+                                type="button"
+                                id="btn-webcam-rescan-plate"
+                                onClick={handleUnlockPlate}
+                                title={language === 'fr' ? "Effacer et relire la plaque immédiatement" : "Clear and rescan plate immediately"}
+                                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-[10px] font-mono font-bold border border-slate-600 cursor-pointer transition-colors flex items-center gap-1"
+                              >
+                                <span>{language === 'fr' ? '🔄 Relire' : '🔄 Rescan'}</span>
+                              </button>
                               {isPlateManuallyEdited && (
                                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 font-mono font-bold">
                                   {language === 'fr' ? '✏️ Manuel' : '✏️ Manual'}

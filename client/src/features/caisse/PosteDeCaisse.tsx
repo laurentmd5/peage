@@ -463,6 +463,9 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   }, [cameraIp]);
 
   // Automated & On-Demand AI OCR scanning on Hikvision Live Stream
+  const hikvisionResetEpochRef = useRef(0);
+  const scanHikvisionFrameRef = useRef<(immediateConfirm?: boolean, forceFreshCapture?: boolean) => Promise<void>>(() => Promise.resolve());
+
   const scanHikvisionFrame = async (immediateConfirm = false, forceFreshCapture = false) => {
     if (!hikvisionImgRef.current || step !== 'WAITING') return;
     if (isScanningHikvision && !forceFreshCapture) return;
@@ -470,12 +473,16 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
     try {
       setIsScanningHikvision(true);
       if (forceFreshCapture) {
+        hikvisionResetEpochRef.current++;
         setIsCapturingFlash(true);
         setTimeout(() => setIsCapturingFlash(false), 600);
         aiVisionService.reset();
+        setHikvisionLiveDetection(null);
         setHikvisionPlateInput('');
         setIsHikvisionPlateEdited(false);
       }
+
+      const myEpoch = hikvisionResetEpochRef.current;
 
       const img = hikvisionImgRef.current;
       if (!img.naturalWidth || !img.naturalHeight) return;
@@ -492,6 +499,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
 
       // 1. FAST REAL-TIME CATEGORY INFERENCE (MobileNet GPU ~20ms, non-blocking)
       const aiResult = await aiVisionService.detectFromCanvas(canvas);
+      if (myEpoch !== hikvisionResetEpochRef.current) return;
 
       // Expanded reading zone ROI (88% width, 70% height) to encompass wide fronts
       const rx = Math.max(0, Math.round(canvas.width * 0.06));
@@ -508,6 +516,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       // In continuous loop, OCR runs asynchronously in the background via aiVisionService.triggerBackgroundOcr
       if (forceFreshCapture) {
         const ocrResult = await anprOcrService.recognizePlate(canvas, [rx, ry, rw, rh]);
+        if (myEpoch !== hikvisionResetEpochRef.current) return;
         if (ocrResult?.plateNumber) {
           aiVisionService.handleNewOcrResult(ocrResult);
           detectedPlate = ocrResult.plateNumber;
@@ -526,7 +535,8 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       const confidence = Math.max(ocrConfidence, aiResult?.confidence || 85);
 
       if (aiResult || detectedPlate) {
-        const finalPlate = detectedPlate || (hikvisionPlateInput || hikvisionLiveDetection?.plateNumber || '');
+        const manualPlate = (!forceFreshCapture && isHikvisionPlateEdited) ? hikvisionPlateInput : '';
+        const finalPlate = detectedPlate || manualPlate;
         console.log('[ANPR OCR + AI] 🎯 Détection LAPI:', finalPlate || '(attente lecture plaque)', categoryCode, categoryLabel, tariff);
 
         setHikvisionLiveDetection({
@@ -539,8 +549,8 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
           snapshotDataUrl: snapshotUrl
         });
 
-        if (detectedPlate && !isHikvisionPlateEdited) {
-          setHikvisionPlateInput(detectedPlate);
+        if (!isHikvisionPlateEdited || forceFreshCapture) {
+          setHikvisionPlateInput(detectedPlate || '');
         }
 
         if (finalPlate && immediateConfirm) {
@@ -555,8 +565,9 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       } else if (forceFreshCapture) {
         setHikvisionLiveDetection(null);
         setCameraStatusMsg('📸 Aucun véhicule ni plaque détecté devant la caméra. Présentez un véhicule sur la voie.');
-      } else if (!hikvisionPlateInput && !isHikvisionPlateEdited) {
+      } else if (!isHikvisionPlateEdited) {
         setHikvisionLiveDetection(null);
+        setHikvisionPlateInput('');
         setCameraStatusMsg(null);
       }
     } catch (e) {
@@ -565,6 +576,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       setIsScanningHikvision(false);
     }
   };
+  scanHikvisionFrameRef.current = scanHikvisionFrame;
 
   const handleConfirmHikvisionDetection = async (overridePlate?: string, overrideSnapshot?: string, overrideCategory?: string) => {
     const rawPlate = (overridePlate || hikvisionPlateInput || hikvisionLiveDetection?.plateNumber || '').trim().toUpperCase();
@@ -582,6 +594,8 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       if (finalSnapshot) {
         result.vehicleImageUrl = finalSnapshot; // Real picture captured by the camera!
       }
+      hikvisionResetEpochRef.current++;
+      aiVisionService.reset();
       setDetection(result);
       setAmountPaid(result.amountDue);
       setStep('DETECTED');
@@ -600,7 +614,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       aiVisionService.loadModel().catch(() => {});
       anprOcrService.init().catch(() => {});
       interval = setInterval(() => {
-        scanHikvisionFrame(false, false);
+        scanHikvisionFrameRef.current(false, false);
       }, 600);
     }
     return () => {
@@ -713,14 +727,21 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
 
   // Réinitialiser pour véhicule suivant
   const handleNextVehicle = () => {
+    hikvisionResetEpochRef.current++;
+    aiVisionService.reset();
     setDetection(null);
     setStep('WAITING');
     setBarrierOpen(false);
     setAutoCloseCountdown(null);
     setError(null);
+    setCameraStatusMsg(null);
     setHikvisionLiveDetection(null);
     setHikvisionPlateInput('');
     setIsHikvisionPlateEdited(false);
+    setLiveDetection(null);
+    setWebcamPlateInput('');
+    setIsPlateManuallyEdited(false);
+    setIsEditingPlate(false);
   };
 
   return (
@@ -1344,7 +1365,36 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                             <div className="text-[11px] text-emerald-400 font-mono font-bold mt-0.5">
                               <span>Tarif : {formatCurrency(hikvisionLiveDetection.tariff)} FCFA</span>
                             </div>
-                            <div className="flex items-center gap-2 mt-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                              {[
+                                { code: 'CAT1', label: 'Cat 1 (250F)', fullLabel: 'Catégorie 1 (Motos, Tricycles & Taxis)', tariff: 250 },
+                                { code: 'CAT2', label: 'Cat 2 (500F)', fullLabel: 'Catégorie 2 (Voitures & Pick-up)', tariff: 500 },
+                                { code: 'CAT3', label: 'Cat 3 (1 500F)', fullLabel: 'Catégorie 3 (Canter, Bus & Mini-camions)', tariff: 1500 },
+                                { code: 'CAT4', label: 'Cat 4 (5 000F)', fullLabel: 'Catégorie 4 (Camions porteurs 7t-20t)', tariff: 5000 },
+                                { code: 'CAT5', label: 'Cat 5 (10 000F)', fullLabel: 'Catégorie 5 (Semi-remorques >20t)', tariff: 10000 }
+                              ].map((cat) => (
+                                <button
+                                  key={cat.code}
+                                  type="button"
+                                  onClick={() => {
+                                    setHikvisionLiveDetection(prev => prev ? {
+                                      ...prev,
+                                      categoryCode: cat.code,
+                                      categoryLabel: cat.fullLabel,
+                                      tariff: cat.tariff
+                                    } : null);
+                                  }}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border transition-all cursor-pointer ${
+                                    hikvisionLiveDetection.categoryCode === cat.code
+                                      ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                                  }`}
+                                >
+                                  {cat.label}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 mt-1.5">
                               <span className="text-[11px] text-slate-300 font-mono font-bold">Plaque :</span>
                               <input
                                 type="text"
@@ -1367,6 +1417,15 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                               >
                                 <Camera className="w-3.5 h-3.5" />
                                 <span>{language === 'fr' ? '📸 Capturer & Relire' : '📸 Snap & Read'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                id="btn-clear-hikvision"
+                                onClick={handleNextVehicle}
+                                title={language === 'fr' ? 'Effacer la lecture actuelle pour un autre véhicule' : 'Clear current reading for another vehicle'}
+                                className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold border border-slate-600 flex items-center gap-1 cursor-pointer transition-all"
+                              >
+                                <span>{language === 'fr' ? '🔄 Autre véhicule' : '🔄 Clear'}</span>
                               </button>
                             </div>
                           </div>
@@ -1627,9 +1686,39 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                   </div>
 
                   <div className="bg-slate-800/60 rounded-xl p-3 space-y-1.5 text-xs">
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span className="text-slate-400">{t('classifiedCategory')}</span>
                       <span className="font-bold text-emerald-400">[{detection.categoryCode}] {tCategory(detection.categoryCode, detection.categoryLabel)}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1 pt-1 pb-1">
+                      {[
+                        { code: 'CAT1', label: 'Cat 1 (250F)', fullLabel: 'Catégorie 1 (Motos, Tricycles & Taxis)', tariff: 250 },
+                        { code: 'CAT2', label: 'Cat 2 (500F)', fullLabel: 'Catégorie 2 (Voitures & Pick-up)', tariff: 500 },
+                        { code: 'CAT3', label: 'Cat 3 (1 500F)', fullLabel: 'Catégorie 3 (Canter, Bus & Mini-camions)', tariff: 1500 },
+                        { code: 'CAT4', label: 'Cat 4 (5 000F)', fullLabel: 'Catégorie 4 (Camions porteurs 7t-20t)', tariff: 5000 },
+                        { code: 'CAT5', label: 'Cat 5 (10 000F)', fullLabel: 'Catégorie 5 (Semi-remorques >20t)', tariff: 10000 }
+                      ].map((cat) => (
+                        <button
+                          key={cat.code}
+                          type="button"
+                          onClick={() => {
+                            setDetection(prev => prev ? {
+                              ...prev,
+                              categoryCode: cat.code,
+                              categoryLabel: cat.fullLabel,
+                              amountDue: cat.tariff
+                            } : null);
+                            setAmountPaid(cat.tariff);
+                          }}
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border transition-all cursor-pointer ${
+                            detection.categoryCode === cat.code
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                              : 'bg-slate-900 hover:bg-slate-700 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          {cat.label}
+                        </button>
+                      ))}
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-400">{t('ticketGenerated')}</span>
@@ -1653,13 +1742,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                     {t('resetBtn')}
                   </button>
                   <button
-                    onClick={() => {
-                      setDetection(null);
-                      setStep('WAITING');
-                      setHikvisionLiveDetection(null);
-                      setHikvisionPlateInput('');
-                      setIsHikvisionPlateEdited(false);
-                    }}
+                    onClick={handleNextVehicle}
                     className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium flex items-center gap-1.5 border border-slate-700 hover:border-slate-600 transition-colors cursor-pointer"
                   >
                     <Camera className="w-3.5 h-3.5 text-blue-400" />

@@ -160,11 +160,14 @@ class AIVisionService {
   } | null = null;
 
   private ocrRollingBuffer: PlateConsensusReading[] = [];
+  private resetEpoch = 0;
+  private emptyOcrFramesWhenNoVehicle = 0;
 
   /**
    * Resets the ANPR OCR cache and vehicle lock when starting a new vehicle passage
    */
   resetOcr(): void {
+    this.resetEpoch++;
     this.lastOcrPlate = null;
     this.lastOcrCrop = null;
     this.lastOcrCountryLabel = null;
@@ -174,6 +177,7 @@ class AIVisionService {
     this.ocrRollingBuffer = [];
     this.isOcrBusy = false;
     this.emptyFramesCount = 0;
+    this.emptyOcrFramesWhenNoVehicle = 0;
   }
 
   /**
@@ -187,6 +191,7 @@ class AIVisionService {
    * Unlocks the OCR plate reading to allow rescanning a different plate
    */
   unlockPlate(): void {
+    this.resetEpoch++;
     this.lockedPlate = null;
     this.lastOcrPlate = null;
     this.lastOcrCrop = null;
@@ -194,6 +199,7 @@ class AIVisionService {
     this.ocrRollingBuffer = [];
     this.isOcrBusy = false;
     this.lastOcrTimestamp = 0;
+    this.emptyOcrFramesWhenNoVehicle = 0;
   }
 
   /**
@@ -386,20 +392,36 @@ class AIVisionService {
   /**
    * Background asynchronous trigger for ANPR OCR recognition
    */
-  private triggerBackgroundOcr(source: HTMLVideoElement | HTMLCanvasElement, bbox?: [number, number, number, number]): void {
+  private triggerBackgroundOcr(
+    source: HTMLVideoElement | HTMLCanvasElement,
+    bbox?: [number, number, number, number],
+    hasVehicleInFrame = true
+  ): void {
     const now = Date.now();
     if (this.isOcrBusy || (now - this.lastOcrTimestamp < 500)) {
       return;
     }
 
+    const epochAtStart = this.resetEpoch;
     this.isOcrBusy = true;
     anprOcrService.recognizePlate(source, bbox)
       .then(ocrResult => {
-        if (ocrResult && ocrResult.plateNumber) {
-          this.handleNewOcrResult(ocrResult);
-        }
         this.isOcrBusy = false;
         this.lastOcrTimestamp = Date.now();
+        // Ignore stale OCR result if reset() or unlockPlate() was called while OCR was in-flight
+        if (this.resetEpoch !== epochAtStart) {
+          return;
+        }
+        if (ocrResult && ocrResult.plateNumber) {
+          this.emptyOcrFramesWhenNoVehicle = 0;
+          this.handleNewOcrResult(ocrResult);
+        } else if (!hasVehicleInFrame) {
+          this.emptyOcrFramesWhenNoVehicle++;
+          // If the camera sees neither a vehicle nor a plate for 5 consecutive OCR cycles, release stale lock
+          if (this.emptyOcrFramesWhenNoVehicle >= 5) {
+            this.resetOcr();
+          }
+        }
       })
       .catch(() => {
         this.isOcrBusy = false;
@@ -433,6 +455,7 @@ class AIVisionService {
 
       if (vehiclePreds.length > 0) {
         this.emptyFramesCount = 0;
+        this.emptyOcrFramesWhenNoVehicle = 0;
         vehiclePreds.sort((a: any, b: any) => b.score - a.score);
         let best = vehiclePreds[0];
         // Prevent close-up car grilles from being misclassified as low-confidence 'bus' or 'truck' (< 68%)
@@ -442,7 +465,13 @@ class AIVisionService {
         }
         const res = this.mapObjectToCategory(best.class, best.score, best.bbox, canvas.width, ctx, liveSnapshot);
 
-        if (!this.lockedVehicleSnapshot && res.confidence >= 65) {
+        const shouldUpdateLock =
+          (!this.lockedVehicleSnapshot && res.confidence >= 65) ||
+          (this.lockedVehicleCategory &&
+            ((res.confidence > this.lockedVehicleCategory.confidence) ||
+              (this.lockedVehicleCategory.categoryCode === 'CAT2' && res.categoryCode !== 'CAT2' && res.confidence >= 68)));
+
+        if (shouldUpdateLock) {
           this.lockedVehicleSnapshot = liveSnapshot;
           this.lockedVehicleCategory = {
             categoryCode: res.categoryCode,
@@ -461,7 +490,7 @@ class AIVisionService {
           Math.min(Math.round(canvas.width * 0.88), Math.round(best.bbox[2])),
           Math.min(Math.round(canvas.height * 0.74), Math.round(best.bbox[3]))
         ];
-        this.triggerBackgroundOcr(canvas, safeBbox);
+        this.triggerBackgroundOcr(canvas, safeBbox, true);
 
         const activePlate = this.getEffectivePlate();
         return {
@@ -482,7 +511,7 @@ class AIVisionService {
         Math.round(canvas.width * 0.84),
         Math.round(canvas.height * 0.74)
       ];
-      this.triggerBackgroundOcr(canvas, defaultSafeReticle);
+      this.triggerBackgroundOcr(canvas, defaultSafeReticle, false);
       const activePlate = this.getEffectivePlate();
 
       if (!activePlate) {
@@ -568,12 +597,20 @@ class AIVisionService {
 
       // SCENARIO 1: Vehicle silhouette visible in camera frame
       if (vehiclePreds.length > 0) {
+        this.emptyFramesCount = 0;
+        this.emptyOcrFramesWhenNoVehicle = 0;
         vehiclePreds.sort((a: any, b: any) => b.score - a.score);
         const best = vehiclePreds[0];
         const res = this.mapObjectToCategory(best.class, best.score, best.bbox, videoEl.videoWidth, ctx, liveSnapshot);
 
         // FREEZE VEHICLE SNAPSHOT & CATEGORY on first high-confidence detection (Gel automatique)
-        if (!this.lockedVehicleSnapshot && res.confidence >= 55) {
+        const shouldUpdateLock =
+          (!this.lockedVehicleSnapshot && res.confidence >= 55) ||
+          (this.lockedVehicleCategory &&
+            ((res.confidence > this.lockedVehicleCategory.confidence) ||
+              (this.lockedVehicleCategory.categoryCode === 'CAT2' && res.categoryCode !== 'CAT2' && res.confidence >= 68)));
+
+        if (shouldUpdateLock) {
           this.lockedVehicleSnapshot = liveSnapshot;
           this.lockedVehicleCategory = {
             categoryCode: res.categoryCode,
@@ -587,7 +624,7 @@ class AIVisionService {
         }
 
         // Trigger background ANPR OCR recognition
-        this.triggerBackgroundOcr(videoEl, best.bbox);
+        this.triggerBackgroundOcr(videoEl, best.bbox, true);
 
         const activePlate = this.getEffectivePlate();
         return {
@@ -604,7 +641,7 @@ class AIVisionService {
 
       // SCENARIO 2: No vehicle silhouette detected in current frame
       // (e.g. operator zoomed in close to the license plate with smartphone or moved hand)
-      this.triggerBackgroundOcr(videoEl);
+      this.triggerBackgroundOcr(videoEl, undefined, false);
 
       const activePlate = this.getEffectivePlate();
       if (!activePlate) {

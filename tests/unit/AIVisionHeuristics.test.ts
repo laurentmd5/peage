@@ -150,6 +150,19 @@ describe('AI Vision Edge Heuristics & Vehicle Classification Rules', () => {
       aiVisionService.unlockPlate();
       expect(aiVisionService.isPlateReadingLocked()).toBe(false);
       expect(aiVisionService.getEffectivePlate()).toBeNull();
+
+      // Re-lock a vehicle plate (e.g. AA-112-AA) and verify reset() for "Autre véhicule" wipes all state
+      aiVisionService.handleNewOcrResult({
+        plateNumber: 'AA-112-AA',
+        confidence: 95,
+        countryLabel: '🌐 Transit / Import'
+      });
+      expect(aiVisionService.getEffectivePlate()?.plateNumber).toBe('AA-112-AA');
+
+      aiVisionService.reset();
+      expect(aiVisionService.isPlateReadingLocked()).toBe(false);
+      expect(aiVisionService.isVehicleSnapshotLocked()).toBe(false);
+      expect(aiVisionService.getEffectivePlate()).toBeNull();
     });
   });
 });

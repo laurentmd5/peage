@@ -127,7 +127,8 @@ class AnprOcrService {
         const candidateW = maxX - minX;
         const candidateH = bestEndY - bestStartY;
         // Verify realistic aspect ratio & min dimensions for a vehicle license plate
-        if (candidateW >= 60 && candidateH >= 14 && candidateW > candidateH * 1.4) {
+        // Height cannot exceed 40% of vehicle height (avoids capturing entire white truck body)
+        if (candidateW >= 60 && candidateH >= 14 && candidateH <= rh * 0.40 && candidateW > candidateH * 1.3) {
           const padX = Math.round(candidateW * 0.05);
           const px = Math.max(0, minX - padX);
           const pw = Math.min(rw - px, candidateW + padX * 2);
@@ -136,6 +137,16 @@ class AnprOcrService {
       }
     } catch {
       // Fallback on error
+    }
+
+    // Default targeted vehicle plate zone (central lower bumper where 95% of plates sit)
+    if (rh > 80 && rw > 120) {
+      return {
+        x: rx + Math.round(rw * 0.15),
+        y: ry + Math.round(rh * 0.30),
+        w: Math.round(rw * 0.70),
+        h: Math.round(rh * 0.40)
+      };
     }
 
     return { x: rx, y: ry, w: rw, h: rh };
@@ -566,20 +577,15 @@ function correctLetters(str: string): string {
 }
 
 /**
- * Normalizes and grammatically corrects OCR text to Guinea-Bissau (GB), Senegal (DK) or International transit formats
- * Resolves standard OCR glyph confusions
+ * Helper to match and normalize a single alphanumeric candidate string against known plate templates
  */
-export function normalizePlateText(raw: string): {
+function parseSinglePlateCandidate(clean: string): {
   plateNumber: string;
   confidence: number;
   country: 'GW' | 'SN' | 'UNKNOWN';
   countryLabel: string;
 } | null {
-  if (!raw) return null;
-
-  // Clean all noise except alphanumeric
-  const clean = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (clean.length < 5) return null;
+  if (!clean || clean.length < 5) return null;
 
   // Reject on-screen display timestamp / camera text (e.g. "04-24-2020", "FRI", "CAMERA 01")
   if (/CAMERA|FRI|MON|TUE|WED|THU|SAT|SUN/.test(clean)) return null;
@@ -644,7 +650,7 @@ export function normalizePlateText(raw: string): {
     }
   }
 
-  // 3. International / European import format: 2 letters - 3 digits - 2 letters (e.g. AA-331-CM, AB-093-FB)
+  // 3. International / European import format: 2 letters - 3 digits - 2 letters (e.g. AA-112-AA, AB-093-FB)
   // Tolerates single euro-band letter prefix (F, L, D...) and trailing region digits (75, 13...)
   const intlRegex = /^(?:[A-Z]{1})?([A-Z0-9]{2})([0-9OIZSBLAEGT]{3})([A-Z0-9]{2})(?:[0-9]{2})?$/;
   const intlMatch = clean.match(intlRegex);
@@ -678,6 +684,79 @@ export function normalizePlateText(raw: string): {
         countryLabel: '🇬🇼 Guinée-Bissau'
       };
     }
+  }
+
+  return null;
+}
+
+/**
+ * Normalizes and grammatically corrects OCR text to Guinea-Bissau (GB), Senegal (DK) or International transit formats
+ * Resolves standard OCR glyph confusions
+ */
+export function normalizePlateText(raw: string): {
+  plateNumber: string;
+  confidence: number;
+  country: 'GW' | 'SN' | 'UNKNOWN';
+  countryLabel: string;
+} | null {
+  if (!raw) return null;
+
+  // 1. Direct match on full clean string
+  const cleanRaw = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const directMatch = parseSinglePlateCandidate(cleanRaw);
+  if (directMatch) return directMatch;
+
+  // 2. Line by line analysis (essential when OCR reads brand, model, speed sticker or vehicle badge)
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const cleanLine = line.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const lineMatch = parseSinglePlateCandidate(cleanLine);
+    if (lineMatch) return lineMatch;
+
+    // Word tokens sliding window inside the line (e.g. "F AA-112-AA 75" or "AA 112 AA")
+    const words = line.split(/\s+/).filter(Boolean);
+    if (words.length > 1) {
+      for (let i = 0; i < words.length; i++) {
+        // 3-word combo
+        if (i + 2 < words.length) {
+          const combo3 = (words[i] + words[i + 1] + words[i + 2]).toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const m3 = parseSinglePlateCandidate(combo3);
+          if (m3) return m3;
+        }
+        // 2-word combo
+        if (i + 1 < words.length) {
+          const combo2 = (words[i] + words[i + 1]).toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const m2 = parseSinglePlateCandidate(combo2);
+          if (m2) return m2;
+        }
+        // 1-word token
+        const single = words[i].toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const m1 = parseSinglePlateCandidate(single);
+        if (m1) return m1;
+      }
+    }
+  }
+
+  // 3. Substring regex pattern extraction on clean text (e.g. "VOLVOAA112AAFH16")
+  // Matches European / International: 2 letters, 3 digits, 2 letters
+  const intlSub = cleanRaw.match(/(?:[A-Z]{1})?([A-Z]{2}[0-9OIZSBLAEGT]{3}[A-Z]{2})(?:[0-9]{2})?/);
+  if (intlSub && intlSub[1]) {
+    const subMatch = parseSinglePlateCandidate(intlSub[1]);
+    if (subMatch) return subMatch;
+  }
+
+  // Matches Guinea-Bissau GB:
+  const gbSub = cleanRaw.match(/GB[0-9OIZSBLAEGT]{3,4}[A-Z]{1,2}/);
+  if (gbSub) {
+    const subMatch = parseSinglePlateCandidate(gbSub[0]);
+    if (subMatch) return subMatch;
+  }
+
+  // Matches Senegal:
+  const snSub = cleanRaw.match(/(?:DK|ZG|KD|TH|KL|SL)[0-9OIZSBLAEGT]{3,4}[A-Z]{1,2}/);
+  if (snSub) {
+    const subMatch = parseSinglePlateCandidate(snSub[0]);
+    if (subMatch) return subMatch;
   }
 
   return null;

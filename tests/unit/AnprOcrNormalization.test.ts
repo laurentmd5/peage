@@ -90,6 +90,18 @@ describe('ANPR / LAPI OCR Plate Normalization & Grammar Correction', () => {
       expect(result).not.toBeNull();
       expect(result?.plateNumber).toBe('EF-456-GH');
     });
+
+    it('should normalize truck plate AA-112-AA cleanly', () => {
+      const result = normalizePlateText('AA-112-AA');
+      expect(result).not.toBeNull();
+      expect(result?.plateNumber).toBe('AA-112-AA');
+    });
+
+    it('should extract AA-112-AA even with surrounding vehicle noise or multiline text', () => {
+      const result = normalizePlateText('RENAULT\nAA-112-AA\nFH16');
+      expect(result).not.toBeNull();
+      expect(result?.plateNumber).toBe('AA-112-AA');
+    });
   });
 
   describe('Unprefixed Short Formats (defaults to Plaza Guinea-Bissau GB)', () => {

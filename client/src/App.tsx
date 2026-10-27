@@ -107,7 +107,7 @@ export const App: React.FC = () => {
         onLogout={handleLogout}
       />
 
-      <main className="flex-1 pb-16">
+      <main className="flex-1 pb-4">
         {activeTab === 'caisse' && (
           <PosteDeCaisse
             currentUser={currentUser}

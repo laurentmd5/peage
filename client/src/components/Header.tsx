@@ -170,7 +170,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Navigation Tabs */}
-      <nav className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto scrollbar-none border-t border-slate-800">
+      <nav className="max-w-[1600px] mx-auto px-4 flex gap-1 overflow-x-auto scrollbar-none border-t border-slate-800">
         {tabs.map(tab => {
           const isActive = activeTab === tab.id;
           return (

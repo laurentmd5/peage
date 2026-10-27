@@ -745,19 +745,19 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto px-3 py-3 space-y-3">
+    <div className="max-w-[1600px] mx-auto px-3 py-2 space-y-2">
       {/* Top Banner Actions & Emergency Controls */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+      <div className="bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
-            <span className="font-semibold text-slate-300">{t('caisseStatusLabel')}</span>
+            <span className="font-semibold text-slate-300">{t('caisseStatusLabel')} :</span>
             <span className="px-2 py-0.5 bg-slate-800 text-emerald-400 font-mono font-bold rounded border border-slate-700">
               {activeSession?.boothId || 'CAISSE-01'}
             </span>
           </div>
 
           <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-slate-400">{t('barrierStatusLabel')}</span>
+            <span className="text-slate-400">{t('barrierStatusLabel')} :</span>
             <span
               className={`px-2 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] flex items-center gap-1 ${
                 barrierOpen
@@ -777,14 +777,14 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
           <button
             type="button"
             onClick={() => setAutoPrintEnabled(!autoPrintEnabled)}
-            className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 border transition-all ${
+            className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold flex items-center gap-1 border transition-all ${
               autoPrintEnabled
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                 : 'bg-slate-800 text-slate-400 border-slate-700'
             }`}
             title="Activer/Désactiver l'impression automatique du reçu"
           >
-            <Printer className="w-3.5 h-3.5" />
+            <Printer className="w-3 h-3" />
             <span>{autoPrintEnabled ? t('autoPrintActive') : t('autoPrintInactive')}</span>
           </button>
 
@@ -792,27 +792,27 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
           <button
             type="button"
             onClick={handleConnectThermalPrinter}
-            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium flex items-center gap-1 border border-slate-700 transition-colors"
+            className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors"
             title="Associer une imprimante thermique ESC/POS 80mm sur port USB/Série"
           >
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <Zap className="w-3 h-3 text-amber-400" />
             <span>{t('connectThermalBtn')}</span>
           </button>
 
           <button
             onClick={() => setIsManualModalOpen(true)}
-            className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors"
+            className="px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors"
           >
-            <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+            <ShieldAlert className="w-3 h-3 text-amber-400" />
             <span>{t('manualOpenBtn')}</span>
           </button>
 
           {lastTransaction && lastTransaction.status === 'COMPLETED' && (
             <button
               onClick={() => setIsCancelModalOpen(true)}
-              className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors"
+              className="px-2 py-0.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 rounded-lg text-[11px] font-medium flex items-center gap-1 transition-colors"
             >
-              <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+              <AlertTriangle className="w-3 h-3 text-red-400" />
               <span>{t('cancelLastTxBtn')}</span>
             </button>
           )}
@@ -834,9 +834,9 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       )}
 
       {/* Main Grid: Left Flow Station, Right Barrier & Terminal Visualization */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left Column (8 cols): Interactive Cashier Flow */}
-        <div className="lg:col-span-8 space-y-3">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
+        {/* Left Column (7 cols): Interactive Cashier Flow */}
+        <div className="lg:col-span-7 space-y-3">
           {/* STEP 1: EN ATTENTE DE VÉHICULE */}
           {step === 'WAITING' && (
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center space-y-3">
@@ -2011,8 +2011,8 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
         </div>
 
         {/* Right Column (5 cols): Hardware Visualizer (Barrier & Lane Simulation Proforma) */}
-        <div className="lg:col-span-5 space-y-6">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+        <div className="lg:col-span-5 space-y-3">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
             {/* Lane Header with Proforma Selector */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-3 text-xs">
               <div className="flex items-center gap-2">

@@ -35,7 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-50 shadow-lg">
       {/* Top Banner */}
-      <div className="max-w-7xl mx-auto px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs border-b border-slate-800/80">
+      <div className="max-w-[1600px] mx-auto px-4 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs border-b border-slate-800/80">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 font-bold tracking-wider text-emerald-400">
             <Radio className="w-4 h-4 animate-pulse text-emerald-400" />
@@ -120,7 +120,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Main Bar */}
-      <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div className="max-w-[1600px] mx-auto px-4 py-2 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xl">
             🛣️

@@ -745,39 +745,39 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <div className="max-w-[1600px] mx-auto px-3 py-3 space-y-3">
       {/* Top Banner Actions & Emergency Controls */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-slate-200">{t('caisseStatusLabel')}</span>
-            <span className="px-3 py-1 bg-slate-800 text-emerald-400 font-mono font-bold rounded-lg border border-slate-700">
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-slate-300">{t('caisseStatusLabel')}</span>
+            <span className="px-2 py-0.5 bg-slate-800 text-emerald-400 font-mono font-bold rounded border border-slate-700">
               {activeSession?.boothId || 'CAISSE-01'}
             </span>
           </div>
 
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-1.5 text-xs">
             <span className="text-slate-400">{t('barrierStatusLabel')}</span>
             <span
-              className={`px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5 ${
+              className={`px-2 py-0.5 rounded-full font-bold uppercase tracking-wider text-[10px] flex items-center gap-1 ${
                 barrierOpen
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                   : 'bg-red-500/20 text-red-400 border border-red-500/40'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${barrierOpen ? 'bg-emerald-400 animate-ping' : 'bg-red-400'}`}></span>
+              <span className={`w-1.5 h-1.5 rounded-full ${barrierOpen ? 'bg-emerald-400 animate-ping' : 'bg-red-400'}`}></span>
               {barrierOpen ? t('barrierOpenState') : t('barrierClosedState')}
             </span>
           </div>
         </div>
 
         {/* Real Hardware & Quick Override Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           {/* Auto-Print Toggle */}
           <button
             type="button"
             onClick={() => setAutoPrintEnabled(!autoPrintEnabled)}
-            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition-all ${
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 border transition-all ${
               autoPrintEnabled
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                 : 'bg-slate-800 text-slate-400 border-slate-700'
@@ -792,7 +792,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
           <button
             type="button"
             onClick={handleConnectThermalPrinter}
-            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium flex items-center gap-1.5 border border-slate-700 transition-colors"
+            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium flex items-center gap-1 border border-slate-700 transition-colors"
             title="Associer une imprimante thermique ESC/POS 80mm sur port USB/Série"
           >
             <Zap className="w-3.5 h-3.5 text-amber-400" />
@@ -801,18 +801,18 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
 
           <button
             onClick={() => setIsManualModalOpen(true)}
-            className="px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
+            className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors"
           >
-            <ShieldAlert className="w-4 h-4 text-amber-400" />
+            <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
             <span>{t('manualOpenBtn')}</span>
           </button>
 
           {lastTransaction && lastTransaction.status === 'COMPLETED' && (
             <button
               onClick={() => setIsCancelModalOpen(true)}
-              className="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
+              className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors"
             >
-              <AlertTriangle className="w-4 h-4 text-red-400" />
+              <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
               <span>{t('cancelLastTxBtn')}</span>
             </button>
           )}
@@ -820,26 +820,26 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       </div>
 
       {printerStatusMsg && (
-        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3 text-emerald-300 text-xs flex items-center gap-2">
+        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-2.5 text-emerald-300 text-xs flex items-center gap-2">
           <Check className="w-4 h-4 text-emerald-400" />
           <span>{printerStatusMsg}</span>
         </div>
       )}
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-300 text-sm flex items-center justify-between">
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-red-300 text-xs flex items-center justify-between">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="text-xs underline">{t('closeBtn')}</button>
         </div>
       )}
 
       {/* Main Grid: Left Flow Station, Right Barrier & Terminal Visualization */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left Column (8 cols): Interactive Cashier Flow */}
-        <div className="lg:col-span-7 space-y-6">
+        <div className="lg:col-span-8 space-y-3">
           {/* STEP 1: EN ATTENTE DE VÉHICULE */}
           {step === 'WAITING' && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-6">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center space-y-3">
               {/* Mode Switcher: Demo Categories vs Live AI Camera (Webcam) vs Hikvision Smart IPC */}
               <div className="flex items-center justify-center gap-1.5 p-1 bg-slate-950/80 rounded-xl border border-slate-800 max-w-lg mx-auto">
                 <button
@@ -1097,32 +1097,21 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
 
               {/* VIEW 3: HIKVISION REAL INDUSTRIAL LPR CAMERA */}
               {cameraMode === 'HIKVISION' && (
-                <div className="space-y-4 max-w-xl mx-auto text-left">
-                  <div className="bg-slate-950 border border-blue-500/40 rounded-2xl p-5 space-y-4 shadow-2xl">
-                    {/* Camera Header Banner */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold border border-blue-500/30">
-                          <Video className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <div className="text-xs font-bold text-white flex items-center gap-2">
-                            <span>{t('anprCameraTitle')}</span>
-                            <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono text-[10px] border border-blue-500/40 font-bold">
-                              {t('anprCameraBadge')}
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                            {t('anprCameraSubtitle')} • Voie : <span className="text-emerald-400 font-bold">{selectedLane}</span>
-                          </div>
-                        </div>
+                <div className="space-y-3 w-full text-left">
+                  <div className="bg-slate-950 border border-blue-500/40 rounded-2xl p-3 sm:p-4 space-y-3 shadow-2xl">
+                    {/* Compact Camera Sub-Header */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Video className="w-4 h-4 text-blue-400" />
+                        <span className="font-bold text-white text-xs">Caméra LAPI Active</span>
+                        <span className="text-[10px] text-slate-400 font-mono">• Voie : <span className="text-emerald-400 font-bold">{selectedLane}</span></span>
                       </div>
 
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={() => setShowNetworkSettings(prev => !prev)}
-                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-mono transition-colors border ${
+                          className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono transition-colors border ${
                             showNetworkSettings
                               ? 'bg-blue-500/20 text-blue-300 border-blue-500/50'
                               : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-600'
@@ -1133,10 +1122,10 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                           <span>{language === 'fr' ? 'Liaison Réseau' : 'Network Link'}</span>
                         </button>
 
-                        <div className="flex items-center gap-2 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
-                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                          <span className="text-[10px] font-mono font-bold text-emerald-400">
-                            {language === 'fr' ? 'SURVEILLANCE ACTIVE' : 'ACTIVE SURVEILLANCE'}
+                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                          <span className="text-[9px] font-mono font-bold text-emerald-400">
+                            {language === 'fr' ? 'SURVEILLANCE ACTIVE' : 'ACTIVE'}
                           </span>
                         </div>
                       </div>
@@ -1449,10 +1438,10 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                     )}
 
                     {/* Clean Status Footer & Instant Manual/Auto Scan Trigger */}
-                    <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div className="p-2 sm:p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
                       <div className="flex items-center gap-2 text-slate-300">
                         <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                        <span>{isScanningHikvision ? (language === 'fr' ? 'Analyse OCR en cours...' : 'OCR Reading in progress...') : t('anprWaitingVehicle')}</span>
+                        <span className="text-[11px]">{isScanningHikvision ? (language === 'fr' ? 'Analyse OCR en cours...' : 'OCR Reading in progress...') : t('anprWaitingVehicle')}</span>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -1461,7 +1450,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                           id="btn-scan-hikvision-now"
                           onClick={() => scanHikvisionFrame(false, true)}
                           disabled={isScanningHikvision}
-                          className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md hover:scale-105 transition-all cursor-pointer disabled:opacity-50"
+                          className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md hover:scale-105 transition-all cursor-pointer disabled:opacity-50"
                         >
                           <Camera className="w-3.5 h-3.5 text-slate-950" />
                           <span>{language === 'fr' ? '📸 Capturer & Détecter' : '📸 Snap & Detect'}</span>
@@ -2047,59 +2036,29 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
               </div>
             </div>
 
-            {/* Compact Technical Equipment Bar (Proforma AREZKI) */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-              <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800 flex flex-col justify-between">
-                <div className="flex items-center justify-between font-mono text-[11px] font-bold text-slate-200">
-                  <span className="flex items-center gap-1.5">
-                    <span className="text-amber-400">⚡</span>
-                    <span>Inverter 230V</span>
-                  </span>
-                  <span className="flex items-center gap-1 text-[9px] text-emerald-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    <span>230V OK</span>
-                  </span>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1 leading-tight">
-                  {t('descInverter')}
-                </p>
-              </div>
-
-              <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800 flex flex-col justify-between">
-                <div className="flex items-center justify-between font-mono text-[11px] font-bold text-slate-200">
-                  <span className="flex items-center gap-1.5">
-                    <span className="text-sky-400">🌐</span>
-                    <span>Switch 16P PoE</span>
-                  </span>
-                  <span className="flex items-center gap-1 text-[9px] text-emerald-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    <span>Gbps PoE</span>
-                  </span>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1 leading-tight">
-                  {t('descSwitchPoE')}
-                </p>
-              </div>
-
-              <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800 flex flex-col justify-between">
-                <div className="flex items-center justify-between font-mono text-[11px] font-bold text-slate-200">
-                  <span className="flex items-center gap-1.5">
-                    <span className="text-emerald-400">📹</span>
-                    <span>{language === 'fr' ? 'NVR 4 Voies REC' : '4-Lane NVR REC'}</span>
-                  </span>
-                  <span className="flex items-center gap-1 text-[9px] text-emerald-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    <span>25 FPS</span>
-                  </span>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1 leading-tight">
-                  {t('descNvr')}
-                </p>
-              </div>
+            {/* Compact Technical Equipment Bar (Proforma AREZKI) - Collapsible/Discreet */}
+            <div className="flex items-center justify-between gap-1 text-[10px] font-mono bg-slate-950/70 px-2.5 py-1.5 rounded-lg border border-slate-800 text-slate-300">
+              <span className="flex items-center gap-1">
+                <span className="text-amber-400">⚡</span>
+                <span className="font-semibold text-slate-200">230V</span>
+                <span className="text-emerald-400">OK</span>
+              </span>
+              <span className="text-slate-600">|</span>
+              <span className="flex items-center gap-1">
+                <span className="text-sky-400">🌐</span>
+                <span className="font-semibold text-slate-200">Switch PoE</span>
+                <span className="text-emerald-400">Gbps</span>
+              </span>
+              <span className="text-slate-600">|</span>
+              <span className="flex items-center gap-1">
+                <span className="text-emerald-400">📹</span>
+                <span className="font-semibold text-slate-200">NVR</span>
+                <span className="text-emerald-400 animate-pulse">25 FPS</span>
+              </span>
             </div>
 
             {/* Visual Highway Lane Scene with Real Vehicle & Induction Loops */}
-            <div className="relative h-64 bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex flex-col justify-end p-4">
+            <div className="relative h-48 bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex flex-col justify-end p-3">
               {/* 4MP ANPR Camera status in top-left */}
               <div className="absolute top-3 left-3 bg-slate-900/95 border border-slate-700 rounded-lg px-2.5 py-1 text-[10px] font-mono text-slate-300 flex items-center gap-1.5 shadow">
                 <span className={`w-2 h-2 rounded-full ${detection ? 'bg-emerald-400 animate-ping' : 'bg-slate-500'}`}></span>

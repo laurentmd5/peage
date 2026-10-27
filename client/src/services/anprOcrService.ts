@@ -297,8 +297,8 @@ class AnprOcrService {
     mode: 'adaptive' | 'otsu' | 'grayscale' = 'adaptive',
     shearOrTilt = 0
   ): HTMLCanvasElement {
-    const targetW = 300;
-    const targetH = 68;
+    const targetW = 360;
+    const targetH = 82;
 
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = targetW;
@@ -362,7 +362,7 @@ class AnprOcrService {
       for (let i = 0; i < total; i++) {
         stretched[i] = Math.round(((gray[i] - minG) / gRange) * 255);
       }
-      // 3x3 Unsharp Mask (Laplacian sharpening) to restore crisp strokes on upscaled camera crops
+      // 3x3 Unsharp Mask (balanced Laplacian sharpening to preserve M/N diagonal strokes without ringing)
       for (let y = 0; y < targetH; y++) {
         for (let x = 0; x < targetW; x++) {
           const i = y * targetW + x;
@@ -371,7 +371,7 @@ class AnprOcrService {
             const lap =
               5 * stretched[i] -
               (stretched[i - 1] + stretched[i + 1] + stretched[i - targetW] + stretched[i + targetW]);
-            norm = Math.max(0, Math.min(255, Math.round(0.35 * stretched[i] + 0.65 * lap)));
+            norm = Math.max(0, Math.min(255, Math.round(0.50 * stretched[i] + 0.50 * lap)));
           }
           const idx = i * 4;
           outData[idx] = norm;
@@ -655,6 +655,22 @@ class AnprOcrService {
         const rawGray = resGray.data.text ? resGray.data.text.trim() : '';
         const normGray = rawGray ? normalizePlateText(rawGray) : null;
         if (normGray) {
+          normGray.plateNumber = disambiguateHMOnCanvas(canvasGray, normGray.plateNumber);
+          // If an H still remains in letter positions, cross-check with adaptive pass in case adaptive reads M
+          const partsG = normGray.plateNumber.split('-');
+          const hasHInLetters = partsG[0]?.includes('H') || partsG[partsG.length - 1]?.includes('H');
+          if (hasHInLetters) {
+            const checkAdapt = this.preprocessPlateImage(srcCanvas, plateCrop.x, plateCrop.y, plateCrop.w, plateCrop.h, 'adaptive', autoShear);
+            const resCheck = await this.worker.recognize(checkAdapt);
+            const rawCheck = resCheck.data.text ? resCheck.data.text.trim() : '';
+            const normCheck = rawCheck ? normalizePlateText(rawCheck) : null;
+            if (normCheck) {
+              normCheck.plateNumber = disambiguateHMOnCanvas(checkAdapt, normCheck.plateNumber);
+              if (normCheck.plateNumber.replace(/M/g, 'H') === normGray.plateNumber && normCheck.plateNumber.includes('M')) {
+                normGray.plateNumber = normCheck.plateNumber;
+              }
+            }
+          }
           return {
             ...normGray,
             rawText: rawGray,
@@ -671,6 +687,7 @@ class AnprOcrService {
           const rawAdapt = resAdapt.data.text ? resAdapt.data.text.trim() : '';
           const normAdapt = rawAdapt ? normalizePlateText(rawAdapt) : null;
           if (normAdapt) {
+            normAdapt.plateNumber = disambiguateHMOnCanvas(canvasGray, normAdapt.plateNumber);
             return {
               ...normAdapt,
               rawText: rawAdapt,
@@ -686,6 +703,7 @@ class AnprOcrService {
           const rawDeskew = resDeskew.data.text ? resDeskew.data.text.trim() : '';
           const normDeskew = rawDeskew ? normalizePlateText(rawDeskew) : null;
           if (normDeskew) {
+            normDeskew.plateNumber = disambiguateHMOnCanvas(deskewed, normDeskew.plateNumber);
             return {
               ...normDeskew,
               rawText: rawDeskew,
@@ -701,6 +719,7 @@ class AnprOcrService {
           const rawOtsu = resOtsu.data.text ? resOtsu.data.text.trim() : '';
           const normOtsu = rawOtsu ? normalizePlateText(rawOtsu) : null;
           if (normOtsu) {
+            normOtsu.plateNumber = disambiguateHMOnCanvas(canvasGray, normOtsu.plateNumber);
             return {
               ...normOtsu,
               rawText: rawOtsu,
@@ -864,6 +883,8 @@ class AnprOcrService {
 
       if (!normalized) return null;
 
+      normalized.plateNumber = disambiguateHMOnCanvas(activeCanvas, normalized.plateNumber);
+
       const cropDataUrl = activeCanvas.toDataURL('image/jpeg', 0.85);
       return {
         ...normalized,
@@ -881,6 +902,281 @@ class AnprOcrService {
       await this.worker.terminate();
       this.worker = null;
     }
+  }
+}
+
+/**
+ * Topological pixel-geometry disambiguator between 'H' and 'M' on license plates (e.g. AA-331-CM vs AA-331-CH).
+ * On condensed SIV / FE-Schrift license plate fonts, the central V of 'M' stops at the midline (y ~ 50%),
+ * which Tesseract can confuse with the horizontal crossbar of 'H'.
+ * Geometrically:
+ * - 'H' is vertically symmetric: its upper interior (y: 8%..42%) and lower interior (y: 58%..92%) between the two outer legs are both empty white space.
+ * - 'M' is strongly top-heavy: its upper interior (y: 8%..42%) contains the two diagonal strokes (\ /), while its lower interior (y: 58%..92%) is empty white space.
+ */
+export function disambiguateHMOnCanvas(canvas: HTMLCanvasElement, plateNumber: string): string {
+  if (!plateNumber || !plateNumber.includes('H')) return plateNumber;
+  const parts = plateNumber.split('-');
+  if (parts.length < 3) return plateNumber;
+
+  let prefix = parts[0];
+  let suffix = parts[parts.length - 1];
+  if (!prefix.includes('H') && !suffix.includes('H')) return plateNumber;
+
+  try {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return plateNumber;
+
+    const W = canvas.width;
+    const H = canvas.height;
+    const margin = W > 120 && H > 50 ? 18 : 0;
+    const pw = W - margin * 2;
+    const ph = H - margin * 2;
+    if (pw < 60 || ph < 20) return plateNumber;
+
+    const imgData = ctx.getImageData(margin, margin, pw, ph).data;
+    const gray = new Uint8Array(pw * ph);
+
+    let minG = 255;
+    let maxG = 0;
+    const yScan1 = Math.round(ph * 0.16);
+    const yScan2 = Math.round(ph * 0.84);
+
+    for (let y = 0; y < ph; y++) {
+      for (let x = 0; x < pw; x++) {
+        const idx = (y * pw + x) * 4;
+        const g = (imgData[idx] * 77 + imgData[idx + 1] * 150 + imgData[idx + 2] * 29) >> 8;
+        gray[y * pw + x] = g;
+        if (y >= yScan1 && y <= yScan2) {
+          if (g < minG) minG = g;
+          if (g > maxG) maxG = g;
+        }
+      }
+    }
+
+    const thresh = minG + (maxG - minG) * 0.56;
+    const colDark = new Uint16Array(pw);
+    for (let x = 0; x < pw; x++) {
+      let d = 0;
+      for (let y = yScan1; y <= yScan2; y++) {
+        if (gray[y * pw + x] < thresh) d++;
+      }
+      colDark[x] = d;
+    }
+
+    const minColInk = Math.max(2, Math.round((yScan2 - yScan1) * 0.10));
+    const rawSegs: Array<{ x0: number; x1: number }> = [];
+    let inSeg = false;
+    let s0 = 0;
+    for (let x = 0; x < pw; x++) {
+      if (colDark[x] >= minColInk) {
+        if (!inSeg) {
+          inSeg = true;
+          s0 = x;
+        }
+      } else if (inSeg) {
+        rawSegs.push({ x0: s0, x1: x - 1 });
+        inSeg = false;
+      }
+    }
+    if (inSeg) rawSegs.push({ x0: s0, x1: pw - 1 });
+
+    // Split any merged double-character segment at its internal minimum column
+    const splitSegs: Array<{ x0: number; x1: number }> = [];
+    for (const seg of rawSegs) {
+      const sw = seg.x1 - seg.x0 + 1;
+      if (sw > pw * 0.145 && sw >= 16) {
+        let minX = seg.x0 + Math.round(sw * 0.35);
+        let minVal = colDark[minX];
+        for (let x = seg.x0 + Math.round(sw * 0.30); x <= seg.x0 + Math.round(sw * 0.70); x++) {
+          if (colDark[x] < minVal) {
+            minVal = colDark[x];
+            minX = x;
+          }
+        }
+        splitSegs.push({ x0: seg.x0, x1: minX - 1 });
+        splitSegs.push({ x0: minX + 1, x1: seg.x1 });
+      } else {
+        splitSegs.push(seg);
+      }
+    }
+
+    // Refine vertical bounds and filter for full-height plate characters (ignores hyphens '-' and stacked DK/01 badges)
+    interface CharBox {
+      x0: number;
+      x1: number;
+      y0: number;
+      y1: number;
+      hasDualStems: boolean;
+    }
+    const charBoxes: CharBox[] = [];
+    const yUpEnd = Math.round(ph * 0.44);
+    const yMid1 = Math.round(ph * 0.42);
+    const yMid2 = Math.round(ph * 0.58);
+    const yLowStart = Math.round(ph * 0.56);
+
+    for (const seg of splitSegs) {
+      const sw = seg.x1 - seg.x0 + 1;
+      if (sw < 5 || sw > pw * 0.16) continue;
+
+      let yMin = ph;
+      let yMax = 0;
+      let upCount = 0;
+      let midCount = 0;
+      let lowCount = 0;
+
+      for (let y = Math.round(ph * 0.08); y < Math.round(ph * 0.92); y++) {
+        let rowHasDark = false;
+        for (let x = seg.x0; x <= seg.x1; x++) {
+          if (gray[y * pw + x] < thresh) {
+            rowHasDark = true;
+            if (y >= yScan1 && y <= yUpEnd) upCount++;
+            if (y >= yMid1 && y <= yMid2) midCount++;
+            if (y >= yLowStart && y <= yScan2) lowCount++;
+          }
+        }
+        if (rowHasDark) {
+          if (y < yMin) yMin = y;
+          if (y > yMax) yMax = y;
+        }
+      }
+
+      const sh = yMax - yMin + 1;
+      if (sh < ph * 0.38 || upCount === 0 || midCount === 0 || lowCount === 0) continue;
+
+      // Check if glyph has both left and right vertical stems (true for H and M, false for C, E, F, L, T, etc.)
+      const leftStemW = Math.max(1, Math.round(sw * 0.28));
+      const rightStemStart = seg.x1 - Math.max(1, Math.round(sw * 0.28)) + 1;
+      let leftStemDark = 0;
+      let rightStemDark = 0;
+      const stemArea = leftStemW * sh;
+      for (let y = yMin; y <= yMax; y++) {
+        for (let x = seg.x0; x < seg.x0 + leftStemW; x++) {
+          if (gray[y * pw + x] < thresh) leftStemDark++;
+        }
+        for (let x = rightStemStart; x <= seg.x1; x++) {
+          if (gray[y * pw + x] < thresh) rightStemDark++;
+        }
+      }
+      const hasDualStems = leftStemDark > stemArea * 0.35 && rightStemDark > stemArea * 0.35;
+
+      charBoxes.push({ x0: seg.x0, x1: seg.x1, y0: yMin, y1: yMax, hasDualStems });
+    }
+
+    const isGlyphMInsteadOfH = (box: CharBox): boolean => {
+      const sw = box.x1 - box.x0 + 1;
+      const sh = box.y1 - box.y0 + 1;
+      if (sw < 5 || sh < 12) return false;
+
+      const ix0 = box.x0 + Math.max(1, Math.round(sw * 0.23));
+      const ix1 = box.x1 - Math.max(1, Math.round(sw * 0.23));
+      if (ix1 <= ix0) return false;
+
+      const uY0 = box.y0 + Math.round(sh * 0.06);
+      const uY1 = box.y0 + Math.round(sh * 0.42);
+      const lY0 = box.y0 + Math.round(sh * 0.58);
+      const lY1 = box.y0 + Math.round(sh * 0.94);
+
+      let uInnerSum = 0;
+      let uInnerCnt = 0;
+      for (let y = uY0; y <= uY1; y++) {
+        for (let x = ix0; x <= ix1; x++) {
+          uInnerSum += 255 - gray[y * pw + x];
+          uInnerCnt++;
+        }
+      }
+
+      let lInnerSum = 0;
+      let lInnerCnt = 0;
+      for (let y = lY0; y <= lY1; y++) {
+        for (let x = ix0; x <= ix1; x++) {
+          lInnerSum += 255 - gray[y * pw + x];
+          lInnerCnt++;
+        }
+      }
+
+      const upperInnerDark = uInnerCnt > 0 ? uInnerSum / uInnerCnt : 0;
+      const lowerInnerDark = lInnerCnt > 0 ? lInnerSum / lInnerCnt : 0;
+
+      let uFullSum = 0;
+      let uFullCnt = 0;
+      for (let y = box.y0 + Math.round(sh * 0.08); y <= box.y0 + Math.round(sh * 0.40); y++) {
+        for (let x = box.x0; x <= box.x1; x++) {
+          uFullSum += 255 - gray[y * pw + x];
+          uFullCnt++;
+        }
+      }
+
+      let lFullSum = 0;
+      let lFullCnt = 0;
+      for (let y = box.y0 + Math.round(sh * 0.60); y <= box.y0 + Math.round(sh * 0.92); y++) {
+        for (let x = box.x0; x <= box.x1; x++) {
+          lFullSum += 255 - gray[y * pw + x];
+          lFullCnt++;
+        }
+      }
+
+      const upperFullDark = uFullCnt > 0 ? uFullSum / uFullCnt : 0;
+      const lowerFullDark = lFullCnt > 0 ? lFullSum / lFullCnt : 0;
+
+      // In 'M', the upper interior has the two V-diagonals (\ /), whereas in 'H' both upper and lower interiors are empty
+      if (upperInnerDark > lowerInnerDark + 6.5 && upperInnerDark > lowerInnerDark * 1.12) {
+        return true;
+      }
+      if (upperFullDark > lowerFullDark * 1.11 && upperInnerDark > lowerInnerDark + 4) {
+        return true;
+      }
+      return false;
+    };
+
+    // Disambiguate H -> M in suffix (right side of plate, x0 >= 50% width)
+    if (suffix.includes('H')) {
+      const rightBoxes = charBoxes.filter(b => b.x0 >= pw * 0.50);
+      const dualStemRight = rightBoxes.filter(b => b.hasDualStems);
+      const sChars = suffix.split('');
+
+      for (let i = 0; i < sChars.length; i++) {
+        if (sChars[i] !== 'H') continue;
+        // Pick matching box from rightBoxes (or dualStemRight if only one H/M exists in suffix)
+        let targetBox: CharBox | undefined;
+        if (sChars.length === 2 && rightBoxes.length >= 2) {
+          // If there is a trailing region badge box after the 2 suffix letters, prefer the dual-stem box at the expected slot
+          if (i === 1 && dualStemRight.length === 1) {
+            targetBox = dualStemRight[0];
+          } else {
+            targetBox = rightBoxes[i];
+          }
+        } else if (dualStemRight.length > 0) {
+          targetBox = dualStemRight[dualStemRight.length - 1];
+        } else if (rightBoxes.length > 0) {
+          targetBox = rightBoxes[rightBoxes.length - 1];
+        }
+
+        if (targetBox && isGlyphMInsteadOfH(targetBox)) {
+          sChars[i] = 'M';
+        }
+      }
+      suffix = sChars.join('');
+    }
+
+    // Disambiguate H -> M in prefix (left side of plate, x1 <= 48% width)
+    if (prefix.includes('H') && prefix !== 'TH') {
+      const leftBoxes = charBoxes.filter(b => b.x1 <= pw * 0.48);
+      const pChars = prefix.split('');
+      for (let i = 0; i < pChars.length; i++) {
+        if (pChars[i] !== 'H') continue;
+        const targetBox = leftBoxes[i];
+        if (targetBox && isGlyphMInsteadOfH(targetBox)) {
+          pChars[i] = 'M';
+        }
+      }
+      prefix = pChars.join('');
+    }
+
+    parts[0] = prefix;
+    parts[parts.length - 1] = suffix;
+    return parts.join('-');
+  } catch {
+    return plateNumber;
   }
 }
 

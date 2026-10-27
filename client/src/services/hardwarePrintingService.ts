@@ -124,13 +124,16 @@ class HardwarePrintingService {
         <title>Ticket de Péage - ${data.ticketNumber}</title>
         <style>
           @page {
-            size: 80mm auto;
+            size: 80mm 145mm;
             margin: 0mm;
           }
-          body {
-            font-family: 'Courier New', Courier, monospace, monospace;
-            width: 76mm;
-            margin: 2mm auto;
+          html, body {
+            width: 80mm;
+            max-width: 80mm;
+            margin: 0;
+            padding: 2mm;
+            box-sizing: border-box;
+            font-family: 'Courier New', Courier, monospace;
             color: #000;
             background: #fff;
             font-size: 11px;

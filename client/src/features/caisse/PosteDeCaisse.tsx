@@ -464,7 +464,49 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
 
   // Automated & On-Demand AI OCR scanning on Hikvision Live Stream
   const hikvisionResetEpochRef = useRef(0);
+  const hikvisionManualCatRef = useRef<{ code: string; label: string; tariff: number } | null>(null);
   const scanHikvisionFrameRef = useRef<(immediateConfirm?: boolean, forceFreshCapture?: boolean) => Promise<void>>(() => Promise.resolve());
+
+  const handleTriggerNoPlateVehicle = () => {
+    let snapshotUrl: string | undefined = hikvisionLiveDetection?.snapshotDataUrl;
+    const img = hikvisionImgRef.current;
+    if (img && img.naturalWidth && img.naturalHeight) {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          snapshotUrl = canvas.toDataURL('image/jpeg', 0.92);
+        }
+      } catch (_) {}
+    }
+
+    const defaultCat = hikvisionManualCatRef.current || (hikvisionLiveDetection ? {
+      code: hikvisionLiveDetection.categoryCode,
+      label: hikvisionLiveDetection.categoryLabel,
+      tariff: hikvisionLiveDetection.tariff
+    } : {
+      code: 'CAT1',
+      label: 'Catégorie 1 (Motos, Tricycles & Taxis)',
+      tariff: 250
+    });
+
+    hikvisionManualCatRef.current = defaultCat;
+    setIsHikvisionPlateEdited(true);
+    setHikvisionPlateInput('SANS-PLAQUE');
+    setHikvisionLiveDetection({
+      plateNumber: 'SANS-PLAQUE',
+      countryLabel: 'Sans Plaque',
+      confidence: 100,
+      categoryCode: defaultCat.code,
+      categoryLabel: defaultCat.label,
+      tariff: defaultCat.tariff,
+      snapshotDataUrl: snapshotUrl
+    });
+    setCameraStatusMsg(`🛵 Mode Sans Plaque activé [${defaultCat.code} - ${formatCurrency(defaultCat.tariff)} FCFA] — Cliquez sur Valider.`);
+  };
 
   const scanHikvisionFrame = async (immediateConfirm = false, forceFreshCapture = false) => {
     if (!hikvisionImgRef.current || step !== 'WAITING') return;
@@ -474,6 +516,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       setIsScanningHikvision(true);
       if (forceFreshCapture) {
         hikvisionResetEpochRef.current++;
+        hikvisionManualCatRef.current = null;
         setIsCapturingFlash(true);
         setTimeout(() => setIsCapturingFlash(false), 600);
         aiVisionService.reset();
@@ -529,15 +572,16 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
         ocrCountryLabel = aiResult.ocrCountryLabel || 'Auto';
       }
 
-      const categoryCode = aiResult?.categoryCode || (hikvisionLiveDetection?.categoryCode || 'CAT2');
-      const categoryLabel = aiResult?.categoryLabel || (hikvisionLiveDetection?.categoryLabel || 'Voitures & Pick-up');
-      const tariff = aiResult?.tariff || (hikvisionLiveDetection?.tariff || 500);
+      const manualCat = hikvisionManualCatRef.current;
+      const categoryCode = manualCat?.code || aiResult?.categoryCode || (hikvisionLiveDetection?.categoryCode || 'CAT2');
+      const categoryLabel = manualCat?.label || aiResult?.categoryLabel || (hikvisionLiveDetection?.categoryLabel || 'Voitures & Pick-up');
+      const tariff = manualCat?.tariff || aiResult?.tariff || (hikvisionLiveDetection?.tariff || 500);
       const confidence = Math.max(ocrConfidence, aiResult?.confidence || 85);
 
-      if (aiResult || detectedPlate) {
+      if (aiResult || detectedPlate || forceFreshCapture) {
         const manualPlate = (!forceFreshCapture && isHikvisionPlateEdited) ? hikvisionPlateInput : '';
         const finalPlate = detectedPlate || manualPlate;
-        console.log('[ANPR OCR + AI] 🎯 Détection LAPI:', finalPlate || '(attente lecture plaque)', categoryCode, categoryLabel, tariff);
+        console.log('[ANPR OCR + AI] 🎯 Détection LAPI:', finalPlate || '(attente lecture plaque / sans plaque)', categoryCode, categoryLabel, tariff);
 
         setHikvisionLiveDetection({
           plateNumber: finalPlate,
@@ -549,7 +593,11 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
           snapshotDataUrl: snapshotUrl
         });
 
-        if (!isHikvisionPlateEdited || forceFreshCapture) {
+        if (forceFreshCapture && !detectedPlate) {
+          // Lock the banner open on manual capture even if no plate was read so cashier can validate without plate
+          setIsHikvisionPlateEdited(true);
+          setHikvisionPlateInput('');
+        } else if (!isHikvisionPlateEdited || forceFreshCapture) {
           setHikvisionPlateInput(detectedPlate || '');
         }
 
@@ -558,14 +606,11 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
         } else if (finalPlate) {
           setCameraStatusMsg(`✅ Cible LAPI prête : ${finalPlate} [${categoryCode} - ${formatCurrency(tariff)} FCFA]`);
         } else if (forceFreshCapture) {
-          setCameraStatusMsg(`📸 Véhicule [${categoryCode}] capturé ! Plaque non lue sur cette prise — centrez la plaque et recliquez.`);
+          setCameraStatusMsg(`📸 Photo capturée [${categoryCode}] ! Plaque non détectée — validez Sans Plaque ou saisissez-la.`);
         } else {
-          setCameraStatusMsg(`🚗 Véhicule détecté [${categoryCode} - ${formatCurrency(tariff)} FCFA] - Alignez la plaque pour lecture...`);
+          setCameraStatusMsg(`🚗 Véhicule détecté [${categoryCode} - ${formatCurrency(tariff)} FCFA] - Alignez la plaque ou validez Sans Plaque...`);
         }
-      } else if (forceFreshCapture) {
-        setHikvisionLiveDetection(null);
-        setCameraStatusMsg('📸 Aucun véhicule ni plaque détecté devant la caméra. Présentez un véhicule sur la voie.');
-      } else if (!isHikvisionPlateEdited) {
+      } else if (!isHikvisionPlateEdited && !hikvisionManualCatRef.current) {
         setHikvisionLiveDetection(null);
         setHikvisionPlateInput('');
         setCameraStatusMsg(null);
@@ -580,26 +625,24 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
 
   const handleConfirmHikvisionDetection = async (overridePlate?: string, overrideSnapshot?: string, overrideCategory?: string) => {
     const rawPlate = (overridePlate || hikvisionPlateInput || hikvisionLiveDetection?.plateNumber || '').trim().toUpperCase();
-    if (!rawPlate) {
-      setError(language === 'fr' ? 'Veuillez scanner ou saisir une plaque valide.' : 'Please scan or enter a valid plate.');
-      return;
-    }
+    const effectivePlate = rawPlate || 'SANS-PLAQUE';
 
-    const finalCategory = overrideCategory || hikvisionLiveDetection?.categoryCode || 'CAT2';
+    const finalCategory = overrideCategory || hikvisionLiveDetection?.categoryCode || 'CAT1';
     const finalSnapshot = overrideSnapshot || hikvisionLiveDetection?.snapshotDataUrl;
     setLoading(true);
     setError(null);
     try {
-      const result = await api.detectVehicle(selectedLane, rawPlate, finalCategory, finalSnapshot);
+      const result = await api.detectVehicle(selectedLane, effectivePlate, finalCategory, finalSnapshot);
       if (finalSnapshot) {
         result.vehicleImageUrl = finalSnapshot; // Real picture captured by the camera!
       }
       hikvisionResetEpochRef.current++;
+      hikvisionManualCatRef.current = null;
       aiVisionService.reset();
       setDetection(result);
       setAmountPaid(result.amountDue);
       setStep('DETECTED');
-      setCameraStatusMsg(`✅ Plaque validée avec photo réelle : ${rawPlate} [${finalCategory} - ${formatCurrency(result.amountDue)} FCFA]`);
+      setCameraStatusMsg(`✅ Véhicule validé : ${effectivePlate} [${finalCategory} - ${formatCurrency(result.amountDue)} FCFA]`);
     } catch (err: any) {
       setError(`Erreur détection: ${err.message}`);
     } finally {
@@ -728,6 +771,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
   // Réinitialiser pour véhicule suivant
   const handleNextVehicle = () => {
     hikvisionResetEpochRef.current++;
+    hikvisionManualCatRef.current = null;
     aiVisionService.reset();
     setDetection(null);
     setStep('WAITING');
@@ -908,6 +952,17 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                     >
                       <Settings className="w-3 h-3 text-blue-400" />
                       <span>{language === 'fr' ? 'Réseau' : 'Network'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      id="btn-hikvision-no-plate"
+                      onClick={handleTriggerNoPlateVehicle}
+                      disabled={loading}
+                      title={language === 'fr' ? "Valider une moto ou un véhicule sans plaque d'immatriculation" : "Validate a motorcycle or vehicle without license plate"}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 font-bold text-xs flex items-center gap-1 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <span>{language === 'fr' ? '🛵 Sans Plaque' : '🛵 No Plate'}</span>
                     </button>
 
                     <button
@@ -1351,6 +1406,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                   key={cat.code}
                                   type="button"
                                   onClick={() => {
+                                    hikvisionManualCatRef.current = { code: cat.code, label: cat.fullLabel, tariff: cat.tariff };
                                     setHikvisionLiveDetection(prev => prev ? {
                                       ...prev,
                                       categoryCode: cat.code,
@@ -1378,9 +1434,21 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                   setHikvisionPlateInput(e.target.value.toUpperCase());
                                   setIsHikvisionPlateEdited(true);
                                 }}
-                                placeholder="-- Non lue --"
-                                className="bg-slate-950 border border-emerald-500/60 text-white font-mono font-black text-xs px-2 py-0.5 rounded-lg uppercase tracking-wider w-36 placeholder:text-slate-600 placeholder:font-normal placeholder:text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none"
+                                placeholder="-- Sans plaque --"
+                                className="bg-slate-950 border border-emerald-500/60 text-white font-mono font-black text-xs px-2 py-0.5 rounded-lg uppercase tracking-wider w-36 placeholder:text-slate-500 placeholder:font-normal placeholder:text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none"
                               />
+                              <button
+                                type="button"
+                                id="btn-set-no-plate"
+                                onClick={() => {
+                                  setHikvisionPlateInput('SANS-PLAQUE');
+                                  setIsHikvisionPlateEdited(true);
+                                }}
+                                title={language === 'fr' ? 'Marquer comme véhicule ou moto sans plaque' : 'Mark as vehicle or motorcycle without plate'}
+                                className="text-[11px] px-2 py-0.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold border border-amber-500/40 flex items-center gap-1 cursor-pointer transition-all"
+                              >
+                                <span>{language === 'fr' ? '🚫 Sans plaque' : '🚫 No plate'}</span>
+                              </button>
                               <button
                                 type="button"
                                 id="btn-recapture-hikvision"
@@ -1409,14 +1477,14 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                           type="button"
                           id="btn-confirm-hikvision-vehicle"
                           onClick={() => handleConfirmHikvisionDetection()}
-                          disabled={loading || !(hikvisionPlateInput || hikvisionLiveDetection.plateNumber)}
+                          disabled={loading}
                           className="w-full sm:w-auto px-4 py-2 bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-emerald-500/25 transition-all hover:scale-105 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <Zap className="w-3.5 h-3.5 fill-slate-950" />
                           <span>
                             {(hikvisionPlateInput || hikvisionLiveDetection.plateNumber)
                               ? `${language === 'fr' ? 'Valider' : 'Confirm'} ${hikvisionPlateInput || hikvisionLiveDetection.plateNumber} (${formatCurrency(hikvisionLiveDetection.tariff)} FCFA)`
-                              : (language === 'fr' ? 'Saisir ou scanner la plaque' : 'Enter or scan plate')}
+                              : `${language === 'fr' ? 'Valider Sans Plaque' : 'Confirm No Plate'} (${formatCurrency(hikvisionLiveDetection.tariff)} FCFA)`}
                           </span>
                         </button>
                       </div>

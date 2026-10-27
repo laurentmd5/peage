@@ -119,76 +119,54 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Main Bar */}
-      <div className="max-w-[1600px] mx-auto px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xl">
-            🛣️
-          </div>
-          <div>
-            <h1 className="font-bold text-base text-white flex items-center gap-2">
-              {t('appTitle')}
-              <span className="text-xs px-2 py-0.5 bg-slate-800 text-slate-300 rounded border border-slate-700">{t('prototypeV1')}</span>
-            </h1>
-          </div>
-        </div>
+      {/* Navigation Tabs + Compact Session & User Info */}
+      <div className="max-w-[1600px] mx-auto px-4 flex items-center justify-between gap-2">
+        <nav className="flex gap-1 overflow-x-auto scrollbar-none">
+          {tabs.map(tab => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => onTabChange(tab.id)}
+                className={`px-3 py-2 text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1.5 border-b-2 ${
+                  isActive
+                    ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10'
+                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </nav>
 
-        {/* Current Active Session & User Info */}
-        <div className="flex items-center gap-3">
+        {/* Current Active Session & User Info (Compact Inline) */}
+        <div className="hidden md:flex items-center gap-2 py-1 shrink-0">
           {activeSession ? (
-            <div className="bg-slate-800/80 border border-emerald-500/30 rounded-lg px-3 py-1.5 flex items-center gap-2 text-xs">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
-              <div>
-                <div className="font-semibold text-emerald-300">{activeSession.boothId} ({t('boothOpen')})</div>
-                <div className="text-[11px] text-slate-400">{t('collectedLabel')} {activeSession.totalCollected.toLocaleString(language === 'fr' ? 'fr-FR' : 'en-US')} FCFA</div>
-              </div>
+            <div className="bg-slate-800/80 border border-emerald-500/30 rounded-lg px-2.5 py-1 flex items-center gap-2 text-[11px]">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+              <span className="font-semibold text-emerald-300">{activeSession.boothId}</span>
+              <span className="text-slate-500">•</span>
+              <span className="text-slate-300 font-mono">{activeSession.totalCollected.toLocaleString(language === 'fr' ? 'fr-FR' : 'en-US')} FCFA</span>
             </div>
           ) : (
-            <div className="bg-slate-800/80 border border-amber-500/30 rounded-lg px-3 py-1.5 flex items-center gap-2 text-xs">
+            <div className="bg-slate-800/80 border border-amber-500/30 rounded-lg px-2.5 py-1 flex items-center gap-1.5 text-[11px]">
               <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-              <div>
-                <div className="font-semibold text-amber-300">{t('boothClosed')}</div>
-                <div className="text-[11px] text-slate-400">{t('openSessionPrompt')}</div>
-              </div>
+              <span className="font-semibold text-amber-300">{t('boothClosed')}</span>
             </div>
           )}
 
           {currentUser && (
-            <div className="bg-slate-800/80 border border-slate-700 rounded-lg px-3 py-1.5 flex items-center gap-2 text-xs">
-              <div className="w-7 h-7 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold">
+            <div className="bg-slate-800/80 border border-slate-700 rounded-lg px-2.5 py-1 flex items-center gap-1.5 text-[11px]">
+              <div className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-[10px]">
                 {currentUser.fullName.charAt(0)}
               </div>
-              <div>
-                <div className="font-semibold text-slate-200">{currentUser.fullName}</div>
-                <div className="text-[11px] text-slate-400 uppercase tracking-wide">
-                  {currentUser.role === 'admin' ? (language === 'fr' ? 'Administrateur' : 'Administrator') : currentUser.role === 'superviseur' ? (language === 'fr' ? 'Superviseur' : 'Supervisor') : (language === 'fr' ? 'Caissier' : 'Cashier')}
-                </div>
-              </div>
+              <span className="font-semibold text-slate-200">{currentUser.fullName}</span>
             </div>
           )}
         </div>
       </div>
-
-      {/* Navigation Tabs */}
-      <nav className="max-w-[1600px] mx-auto px-4 flex gap-1 overflow-x-auto scrollbar-none border-t border-slate-800">
-        {tabs.map(tab => {
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap transition-all flex items-center gap-2 border-b-2 ${
-                isActive
-                  ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10'
-                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              <span>{tab.icon}</span>
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </nav>
     </header>
   );
 };

@@ -839,58 +839,89 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
         <div className="lg:col-span-7 space-y-3">
           {/* STEP 1: EN ATTENTE DE VÉHICULE */}
           {step === 'WAITING' && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center space-y-3">
-              {/* Mode Switcher: Demo Categories vs Live AI Camera (Webcam) vs Hikvision Smart IPC */}
-              <div className="flex items-center justify-center gap-1.5 p-1 bg-slate-950/80 rounded-xl border border-slate-800 max-w-lg mx-auto">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCameraMode('SIMULATION');
-                    stopWebcam();
-                  }}
-                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                    cameraMode === 'SIMULATION'
-                      ? 'bg-slate-800 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>{t('modeSimulation')}</span>
-                </button>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-2.5 text-center space-y-2">
+              {/* Single Unified Toolbar: Mode Switcher + Camera Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+                <div className="flex items-center gap-1 flex-1 min-w-[260px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCameraMode('SIMULATION');
+                      stopWebcam();
+                    }}
+                    className={`flex-1 py-1 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      cameraMode === 'SIMULATION'
+                        ? 'bg-slate-800 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{t('modeSimulation')}</span>
+                  </button>
 
-                <button
-                  type="button"
-                  id="btn-switch-webcam"
-                  onClick={() => {
-                    setCameraMode('WEBCAM');
-                    startWebcam();
-                  }}
-                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                    cameraMode === 'WEBCAM'
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Camera className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>{t('modeWebcam')}</span>
-                </button>
+                  <button
+                    type="button"
+                    id="btn-switch-webcam"
+                    onClick={() => {
+                      setCameraMode('WEBCAM');
+                      startWebcam();
+                    }}
+                    className={`flex-1 py-1 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      cameraMode === 'WEBCAM'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{t('modeWebcam')}</span>
+                  </button>
 
-                <button
-                  type="button"
-                  id="btn-switch-hikvision"
-                  onClick={() => {
-                    setCameraMode('HIKVISION');
-                    stopWebcam();
-                  }}
-                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                    cameraMode === 'HIKVISION'
-                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm ring-1 ring-blue-500/30'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Video className="w-3.5 h-3.5 text-blue-400" />
-                  <span>{t('modeAnprCamera')}</span>
-                </button>
+                  <button
+                    type="button"
+                    id="btn-switch-hikvision"
+                    onClick={() => {
+                      setCameraMode('HIKVISION');
+                      stopWebcam();
+                    }}
+                    className={`flex-1 py-1 px-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                      cameraMode === 'HIKVISION'
+                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm ring-1 ring-blue-500/30'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Video className="w-3.5 h-3.5 text-blue-400" />
+                    <span>{t('modeAnprCamera')}</span>
+                  </button>
+                </div>
+
+                {cameraMode === 'HIKVISION' && (
+                  <div className="flex items-center gap-1.5 pr-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowNetworkSettings(prev => !prev)}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono transition-colors border ${
+                        showNetworkSettings
+                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/50'
+                          : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-600'
+                      }`}
+                      title={language === 'fr' ? "Paramètres de liaison et URL Webhook" : "Network link and Webhook URL settings"}
+                    >
+                      <Settings className="w-3 h-3 text-blue-400" />
+                      <span>{language === 'fr' ? 'Réseau' : 'Network'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      id="btn-scan-hikvision-now"
+                      onClick={() => scanHikvisionFrame(false, true)}
+                      disabled={isScanningHikvision}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1 shadow-md transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <Camera className="w-3.5 h-3.5 text-slate-950" />
+                      <span>{language === 'fr' ? '📸 Capturer & Détecter' : '📸 Snap & Detect'}</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* VIEW 1: LIVE WEBCAM & AI VISION HUD */}
@@ -1097,44 +1128,11 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
 
               {/* VIEW 3: HIKVISION REAL INDUSTRIAL LPR CAMERA */}
               {cameraMode === 'HIKVISION' && (
-                <div className="space-y-3 w-full text-left">
-                  <div className="bg-slate-950 border border-blue-500/40 rounded-2xl p-3 sm:p-4 space-y-3 shadow-2xl">
-                    {/* Compact Camera Sub-Header */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2 text-xs">
-                      <div className="flex items-center gap-2">
-                        <Video className="w-4 h-4 text-blue-400" />
-                        <span className="font-bold text-white text-xs">Caméra LAPI Active</span>
-                        <span className="text-[10px] text-slate-400 font-mono">• Voie : <span className="text-emerald-400 font-bold">{selectedLane}</span></span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowNetworkSettings(prev => !prev)}
-                          className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono transition-colors border ${
-                            showNetworkSettings
-                              ? 'bg-blue-500/20 text-blue-300 border-blue-500/50'
-                              : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-600'
-                          }`}
-                          title={language === 'fr' ? "Paramètres de liaison et URL Webhook" : "Network link and Webhook URL settings"}
-                        >
-                          <Settings className="w-3 h-3 text-blue-400" />
-                          <span>{language === 'fr' ? 'Liaison Réseau' : 'Network Link'}</span>
-                        </button>
-
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                          <span className="text-[9px] font-mono font-bold text-emerald-400">
-                            {language === 'fr' ? 'SURVEILLANCE ACTIVE' : 'ACTIVE'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
+                <div className="space-y-2 w-full text-left">
                     {/* Expandable Dynamic Network & Webhook Configuration */}
                     {showNetworkSettings && (
-                      <div className="bg-slate-900/95 border border-blue-500/30 rounded-xl p-3.5 space-y-3 text-xs">
-                        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div className="bg-slate-900/95 border border-blue-500/30 rounded-xl p-3 space-y-2 text-xs">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
                           <div className="font-bold text-white flex items-center gap-2">
                             <Settings className="w-4 h-4 text-blue-400" />
                             <span>{language === 'fr' ? 'Configuration Réseau Dynamique' : 'Dynamic Network Configuration'}</span>
@@ -1157,7 +1155,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                 networkInfo?.webhookUrls?.[0] ||
                                 `http://${window.location.hostname || '127.0.0.1'}:3001/api/toll/camera-webhook`
                               }
-                              className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-xs text-blue-300 select-all"
+                              className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 font-mono text-xs text-blue-300 select-all"
                             />
                             <button
                               type="button"
@@ -1169,17 +1167,12 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                 setCopiedUrl(true);
                                 setTimeout(() => setCopiedUrl(false), 2000);
                               }}
-                              className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center gap-1.5"
+                              className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center gap-1.5"
                             >
                               {copiedUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                               <span>{copiedUrl ? (language === 'fr' ? 'Copié !' : 'Copied!') : (language === 'fr' ? 'Copier' : 'Copy')}</span>
                             </button>
                           </div>
-                          <p className="text-[10px] text-slate-400">
-                            {language === 'fr'
-                              ? "💡 Cette URL s'adapte automatiquement à l'adresse IP réelle de la machine sans aucun code en dur."
-                              : "💡 This URL automatically adapts to the host machine's actual IP address with zero hardcoded values."}
-                          </p>
                         </div>
 
                         {/* IP Caméra pour le flux visuel */}
@@ -1204,7 +1197,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                 localStorage.setItem('toll_camera_ip', val);
                               }}
                               placeholder="Ex: 192.168.1.64 ou 10.0.0.50"
-                              className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 font-mono text-xs text-white placeholder-slate-500"
+                              className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 font-mono text-xs text-white placeholder-slate-500"
                             />
                             {networkInfo?.activeCameraIp && cameraIp !== networkInfo.activeCameraIp && (
                               <button
@@ -1213,7 +1206,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                   setCameraIp(networkInfo.activeCameraIp!);
                                   localStorage.setItem('toll_camera_ip', networkInfo.activeCameraIp!);
                                 }}
-                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs"
+                                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs"
                               >
                                 {language === 'fr' ? "Utiliser l'IP détectée" : "Use auto-detected IP"}
                               </button>
@@ -1223,15 +1216,12 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                       </div>
                     )}
 
-                    {cameraStatusMsg && (
-                      <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-2.5 text-emerald-300 text-xs flex items-center gap-2">
-                        <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>{cameraStatusMsg}</span>
-                      </div>
-                    )}
-
-                    {/* Camera Live Preview & Optical Targeting */}
-                    <div className={`relative rounded-xl overflow-hidden border bg-black aspect-video flex items-center justify-center shadow-inner group transition-all duration-300 ${
+                    {/* Camera Live Preview & Optical Targeting (Viewport-adaptive height for zero scroll) */}
+                    <div className={`relative rounded-xl overflow-hidden border bg-black w-full flex items-center justify-center shadow-inner group transition-all duration-300 ${
+                      hikvisionLiveDetection
+                        ? 'h-[calc(100vh-305px)] min-h-[210px] max-h-[360px]'
+                        : 'h-[calc(100vh-190px)] min-h-[260px] max-h-[460px]'
+                    } ${
                       isCapturingFlash ? 'border-amber-400 ring-4 ring-amber-400/60 shadow-[0_0_35px_rgba(251,191,36,0.6)]' : 'border-blue-500/40'
                     }`}>
                       {/* Live Continuous Video Stream from Real Hikvision ANPR Camera */}
@@ -1263,7 +1253,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                       <div className="absolute inset-x-0 h-0.5 bg-blue-400 shadow-[0_0_8px_#60a5fa] animate-[bounce_2s_infinite] pointer-events-none"></div>
 
                       {/* Optical HUD Overlay */}
-                      <div className="absolute inset-0 flex flex-col justify-between p-3 pointer-events-none bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/60">
+                      <div className="absolute inset-0 flex flex-col justify-between p-2.5 pointer-events-none bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/60">
                         <div className="flex justify-between items-center text-[10px] font-mono">
                           <span className="px-2 py-0.5 rounded bg-slate-900/90 text-blue-300 border border-blue-500/30 flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
@@ -1275,7 +1265,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         </div>
 
                         {/* Center Target Box - Expanded Optical Reading Zone */}
-                        <div className={`mx-auto w-[92%] sm:w-[88%] h-44 sm:h-52 border-2 rounded-2xl flex flex-col items-center justify-between p-3 transition-all relative ${
+                        <div className={`mx-auto w-[92%] sm:w-[88%] flex-1 my-2 border-2 rounded-2xl flex flex-col items-center justify-between p-2.5 transition-all relative ${
                           hikvisionLiveDetection
                             ? 'border-emerald-400 bg-emerald-500/10 shadow-[0_0_35px_rgba(52,211,153,0.35)]'
                             : 'border-dashed border-blue-400/60 bg-blue-500/5'
@@ -1283,7 +1273,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                           {/* Top HUD Status: Category & Tariff detected in real time */}
                           <div className="w-full flex justify-between items-center text-[10px] font-mono">
                             {hikvisionLiveDetection ? (
-                              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-400 font-bold flex items-center gap-1.5 shadow">
+                              <span className="px-2.5 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-400 font-bold flex items-center gap-1.5 shadow">
                                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
                                 <span>[{hikvisionLiveDetection.categoryCode}] {hikvisionLiveDetection.categoryLabel} — {formatCurrency(hikvisionLiveDetection.tariff)} FCFA</span>
                               </span>
@@ -1301,16 +1291,16 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                           {/* Center Plate Readout / Guidance */}
                           {hikvisionLiveDetection && (hikvisionPlateInput || hikvisionLiveDetection.plateNumber) ? (
                             <div className="flex items-center gap-2 animate-in zoom-in-95">
-                              <span className="text-emerald-300 font-black flex items-center gap-2 bg-slate-950/95 px-4 py-2 rounded-xl border-2 border-emerald-400 shadow-2xl text-sm font-mono">
+                              <span className="text-emerald-300 font-black flex items-center gap-2 bg-slate-950/95 px-3 py-1.5 rounded-xl border-2 border-emerald-400 shadow-2xl text-sm font-mono">
                                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
                                 <span>PLAQUE :</span>
-                                <span className="text-white px-3 py-1 rounded bg-emerald-500/30 border border-emerald-400 font-mono tracking-widest text-base font-black">
+                                <span className="text-white px-2.5 py-0.5 rounded bg-emerald-500/30 border border-emerald-400 font-mono tracking-widest text-base font-black">
                                   {hikvisionPlateInput || hikvisionLiveDetection.plateNumber}
                                 </span>
                               </span>
                             </div>
                           ) : (
-                            <div className="text-xs font-mono text-blue-200 bg-slate-950/90 px-3.5 py-2 rounded-xl border border-blue-500/40 flex items-center gap-2 shadow-lg text-center">
+                            <div className="text-xs font-mono text-blue-200 bg-slate-950/90 px-3 py-1.5 rounded-xl border border-blue-500/40 flex items-center gap-2 shadow-lg text-center">
                               <Camera className="w-4 h-4 text-blue-400 shrink-0" />
                               <span>{hikvisionLiveDetection ? (language === 'fr' ? '🚗 Véhicule détecté ! Cadrez la plaque pour lecture' : 'Vehicle acquired! Center plate in zone') : (language === 'fr' ? 'Avancez le véhicule dans la zone de lecture' : 'Move vehicle into detection zone')}</span>
                             </div>
@@ -1325,16 +1315,16 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
 
                         <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
                           <span>VOIE : {selectedLane}</span>
-                          <span>{hikvisionLiveDetection ? '✅ CIBLE ACQUISE' : t('anprWaitingVehicle')}</span>
+                          <span>{cameraStatusMsg || (hikvisionLiveDetection ? '✅ CIBLE ACQUISE' : t('anprWaitingVehicle'))}</span>
                         </div>
                       </div>
                     </div>
 
                     {/* Live Plate Detection Banner & Confirm Action */}
                     {hikvisionLiveDetection && (
-                      <div className="p-3.5 rounded-xl bg-slate-900/95 border-2 border-emerald-500/70 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in">
-                        <div className="flex items-center gap-3 w-full sm:w-auto">
-                          <div className="w-12 h-12 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center font-bold text-xl overflow-hidden shrink-0">
+                      <div className="p-2.5 rounded-xl bg-slate-950 border-2 border-emerald-500/70 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-2 animate-in fade-in">
+                        <div className="flex items-center gap-2.5 w-full sm:w-auto">
+                          <div className="w-10 h-10 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center font-bold text-lg overflow-hidden shrink-0">
                             {hikvisionLiveDetection.snapshotDataUrl ? (
                               <img src={hikvisionLiveDetection.snapshotDataUrl} alt="Vehicle Crop" className="w-full h-full object-cover" />
                             ) : (
@@ -1342,19 +1332,14 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                             )}
                           </div>
                           <div className="text-left flex-1">
-                            <div className="text-xs font-bold text-white flex items-center gap-2">
-                              <span>[{hikvisionLiveDetection.categoryCode}] {hikvisionLiveDetection.categoryLabel}</span>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-xs font-bold text-white">[{hikvisionLiveDetection.categoryCode}] {hikvisionLiveDetection.categoryLabel}</span>
+                              <span className="text-[10px] text-emerald-400 font-mono font-bold">• {formatCurrency(hikvisionLiveDetection.tariff)} FCFA</span>
+                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-mono">
                                 {hikvisionLiveDetection.confidence}%
                               </span>
-                              <span className="text-[10px] text-slate-400 font-mono">
-                                {hikvisionLiveDetection.countryLabel}
-                              </span>
                             </div>
-                            <div className="text-[11px] text-emerald-400 font-mono font-bold mt-0.5">
-                              <span>Tarif : {formatCurrency(hikvisionLiveDetection.tariff)} FCFA</span>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            <div className="flex flex-wrap items-center gap-1 mt-1">
                               {[
                                 { code: 'CAT1', label: 'Cat 1 (250F)', fullLabel: 'Catégorie 1 (Motos, Tricycles & Taxis)', tariff: 250 },
                                 { code: 'CAT2', label: 'Cat 2 (500F)', fullLabel: 'Catégorie 2 (Voitures & Pick-up)', tariff: 500 },
@@ -1373,7 +1358,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                       tariff: cat.tariff
                                     } : null);
                                   }}
-                                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border transition-all cursor-pointer ${
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border transition-all cursor-pointer ${
                                     hikvisionLiveDetection.categoryCode === cat.code
                                       ? 'bg-emerald-500 text-slate-950 border-emerald-400'
                                       : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
@@ -1383,7 +1368,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                 </button>
                               ))}
                             </div>
-                            <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1">
                               <span className="text-[11px] text-slate-300 font-mono font-bold">Plaque :</span>
                               <input
                                 type="text"
@@ -1394,7 +1379,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                   setIsHikvisionPlateEdited(true);
                                 }}
                                 placeholder="-- Non lue --"
-                                className="bg-slate-950 border border-emerald-500/60 text-white font-mono font-black text-sm px-2.5 py-1 rounded-lg uppercase tracking-wider w-40 placeholder:text-slate-600 placeholder:font-normal placeholder:text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none"
+                                className="bg-slate-950 border border-emerald-500/60 text-white font-mono font-black text-xs px-2 py-0.5 rounded-lg uppercase tracking-wider w-36 placeholder:text-slate-600 placeholder:font-normal placeholder:text-xs focus:ring-2 focus:ring-emerald-400 focus:outline-none"
                               />
                               <button
                                 type="button"
@@ -1402,19 +1387,19 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                                 onClick={() => scanHikvisionFrame(false, true)}
                                 disabled={isScanningHikvision}
                                 title={language === 'fr' ? 'Prendre une photo instantanée et relire la plaque' : 'Take instant snap and re-read plate'}
-                                className="text-xs px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold border border-blue-400 shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all hover:scale-105"
+                                className="text-[11px] px-2 py-0.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold border border-blue-400 shadow-md flex items-center gap-1 cursor-pointer disabled:opacity-50 transition-all"
                               >
-                                <Camera className="w-3.5 h-3.5" />
-                                <span>{language === 'fr' ? '📸 Capturer & Relire' : '📸 Snap & Read'}</span>
+                                <Camera className="w-3 h-3" />
+                                <span>{language === 'fr' ? '📸 Relire' : '📸 Read'}</span>
                               </button>
                               <button
                                 type="button"
                                 id="btn-clear-hikvision"
                                 onClick={handleNextVehicle}
                                 title={language === 'fr' ? 'Effacer la lecture actuelle pour un autre véhicule' : 'Clear current reading for another vehicle'}
-                                className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold border border-slate-600 flex items-center gap-1 cursor-pointer transition-all"
+                                className="text-[11px] px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold border border-slate-600 flex items-center gap-1 cursor-pointer transition-all"
                               >
-                                <span>{language === 'fr' ? '🔄 Autre véhicule' : '🔄 Clear'}</span>
+                                <span>{language === 'fr' ? '🔄 Autre' : '🔄 Clear'}</span>
                               </button>
                             </div>
                           </div>
@@ -1425,9 +1410,9 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                           id="btn-confirm-hikvision-vehicle"
                           onClick={() => handleConfirmHikvisionDetection()}
                           disabled={loading || !(hikvisionPlateInput || hikvisionLiveDetection.plateNumber)}
-                          className="w-full sm:w-auto px-5 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-emerald-500/25 transition-all hover:scale-105 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="w-full sm:w-auto px-4 py-2 bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-emerald-500/25 transition-all hover:scale-105 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <Zap className="w-4 h-4 fill-slate-950" />
+                          <Zap className="w-3.5 h-3.5 fill-slate-950" />
                           <span>
                             {(hikvisionPlateInput || hikvisionLiveDetection.plateNumber)
                               ? `${language === 'fr' ? 'Valider' : 'Confirm'} ${hikvisionPlateInput || hikvisionLiveDetection.plateNumber} (${formatCurrency(hikvisionLiveDetection.tariff)} FCFA)`
@@ -1436,32 +1421,6 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
                         </button>
                       </div>
                     )}
-
-                    {/* Clean Status Footer & Instant Manual/Auto Scan Trigger */}
-                    <div className="p-2 sm:p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <div className="flex items-center gap-2 text-slate-300">
-                        <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                        <span className="text-[11px]">{isScanningHikvision ? (language === 'fr' ? 'Analyse OCR en cours...' : 'OCR Reading in progress...') : t('anprWaitingVehicle')}</span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          id="btn-scan-hikvision-now"
-                          onClick={() => scanHikvisionFrame(false, true)}
-                          disabled={isScanningHikvision}
-                          className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md hover:scale-105 transition-all cursor-pointer disabled:opacity-50"
-                        >
-                          <Camera className="w-3.5 h-3.5 text-slate-950" />
-                          <span>{language === 'fr' ? '📸 Capturer & Détecter' : '📸 Snap & Detect'}</span>
-                        </button>
-
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
-                          {t('anprAutomatedBadge')}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               )}
 

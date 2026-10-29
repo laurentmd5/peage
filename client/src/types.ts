@@ -1,8 +1,10 @@
+export type UserRole = 'admin' | 'superviseur' | 'caissier' | 'operateur' | 'maintenance';
+
 export interface User {
   id: string;
   username: string;
   fullName: string;
-  role: 'admin' | 'superviseur' | 'caissier' | 'operateur' | 'maintenance';
+  role: UserRole;
 }
 
 export type PaymentMethod = 'ESPECES' | 'CARTE' | 'WAVE' | 'ORANGE_MONEY' | 'RFID';

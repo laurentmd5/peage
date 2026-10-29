@@ -39,6 +39,8 @@ export const TransactionsList: React.FC<TransactionsListProps> = ({ currentUser 
   const [cancelLoading, setCancelLoading] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
+  const isCashier = currentUser?.role === 'caissier' || currentUser?.role === 'operateur';
+
   const fetchTransactions = async () => {
     setLoading(true);
     try {
@@ -46,6 +48,7 @@ export const TransactionsList: React.FC<TransactionsListProps> = ({ currentUser 
       if (searchPlate.trim()) params.plateNumber = searchPlate.trim();
       if (filterMethod) params.paymentMethod = filterMethod;
       if (filterStatus) params.status = filterStatus;
+      if (isCashier && currentUser?.id) params.cashierId = currentUser.id;
 
       const data = await api.getTransactions(params);
       setTransactions(data.transactions);
@@ -59,7 +62,7 @@ export const TransactionsList: React.FC<TransactionsListProps> = ({ currentUser 
 
   useEffect(() => {
     fetchTransactions();
-  }, [searchPlate, filterMethod, filterStatus]);
+  }, [searchPlate, filterMethod, filterStatus, currentUser?.id]);
 
   const handleDownloadReceipt = async (tx: TollTransaction) => {
     const doc = await generateReceiptPdf(tx, language);
@@ -89,9 +92,28 @@ export const TransactionsList: React.FC<TransactionsListProps> = ({ currentUser 
       {/* Header & Controls */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white">{t('txRegistryTitle')}</h2>
-          <p className="text-xs text-slate-400">
-            {total} {t('txTotalCount')}
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold text-white">
+              {isCashier
+                ? (language === 'fr' ? 'Mes Transactions de Caisse' : 'My Cash Transactions')
+                : t('txRegistryTitle')}
+            </h2>
+            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${
+              isCashier
+                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
+                : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/20'
+            }`}>
+              {isCashier
+                ? (language === 'fr' ? 'Poste Opérateur' : 'Lane Operator')
+                : (language === 'fr' ? 'Supervision Réseau' : 'Network Supervision')}
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            {isCashier
+              ? (language === 'fr'
+                  ? `${total} transaction(s) enregistrée(s) sous votre session`
+                  : `${total} transaction(s) recorded in your session`)
+              : `${total} ${t('txTotalCount')}`}
           </p>
         </div>
       </div>

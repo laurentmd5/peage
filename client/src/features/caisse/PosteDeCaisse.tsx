@@ -503,7 +503,7 @@ export const PosteDeCaisse: React.FC<PosteDeCaisseProps> = ({
       categoryCode: defaultCat.code,
       categoryLabel: defaultCat.label,
       tariff: defaultCat.tariff,
-      snapshotDataUrl: snapshotUrl
+      snapshotDataUrl: snapshotUrl || ''
     });
     setCameraStatusMsg(`🛵 Mode Sans Plaque activé [${defaultCat.code} - ${formatCurrency(defaultCat.tariff)} FCFA] — Cliquez sur Valider.`);
   };

@@ -128,7 +128,7 @@ export async function generateReceiptPdf(tx: TollTransaction, lang?: PdfLanguage
   doc.setFont('helvetica', 'italic');
   doc.text(isEn ? 'Please keep this receipt for inspection.' : 'Conservez ce reçu pour tout contrôle.', 40, 125, { align: 'center' });
   doc.text(isEn ? 'Have a safe trip and drive carefully!' : 'Bonne route et roulez en sécurité !', 40, 130, { align: 'center' });
-  doc.text(isEn ? 'Automated Toll System Prototype' : 'Prototype de Démonstration Péage DDD', 40, 136, { align: 'center' });
+  doc.text(isEn ? 'Automated Toll Management System' : 'Système de Gestion du Péage Automatisé', 40, 136, { align: 'center' });
 
   return doc;
 }

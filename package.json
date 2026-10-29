@@ -2,7 +2,7 @@
   "name": "systeme-peage-automatise",
   "version": "1.0.0",
   "type": "module",
-  "description": "Prototype de Système de Péage Automatisé avec Architecture DDD et TDD",
+  "description": "Système de Gestion et d'Exploitation du Péage Automatisé - Concession Autoroutière",
   "main": "server/src/index.ts",
   "scripts": {
     "dev:server": "tsx watch server/src/index.ts",

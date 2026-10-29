@@ -9,17 +9,21 @@ export interface Translations {
   };
 }
 
+export type TranslationKey = keyof typeof translations;
+
 export const translations = {
   // App & Header
   appTitle: { fr: 'Système de Péage Automatisé', en: 'Automated Toll System' },
-  appSubtitle: { fr: 'Architecture DDD • Couverture TDD • Validation E2E Playwright', en: 'DDD Architecture • TDD Coverage • E2E Playwright Validation' },
+  appSubtitle: { fr: "Système de Gestion et d'Exploitation du Péage", en: 'Toll Management and Operations System' },
   systemOperational: { fr: 'SYSTÈME OPÉRATIONNEL', en: 'SYSTEM OPERATIONAL' },
   centralStation: { fr: 'Gare Centrale de Péage - Bissau', en: 'Bissau Central Toll Plaza' },
   companyName: { fr: 'PÉAGE AREZKI BISSAU', en: 'AREZKI BISSAU TOLLWAY' },
-  demoProfile: { fr: 'Profil Démo :', en: 'Demo Profile:' },
-  logout: { fr: 'Se déconnecter', en: 'Log out' },
-  prototypeV1: { fr: 'Prototype V1', en: 'Prototype V1' },
-  footerText: { fr: "Système de Péage Automatisé • Concession d'Autoroute • Développé en TDD / DDD • Validation E2E Playwright", en: 'Automated Toll System • Highway Concession • Developed with TDD / DDD • Playwright E2E Validation' },
+  demoProfile: { fr: 'Profil :', en: 'Profile:' },
+  logout: { fr: 'Déconnexion', en: 'Log out' },
+  prototypeV1: { fr: 'Version 1.0 (Production)', en: 'Version 1.0 (Production)' },
+  footerText: { fr: "© 2026 Système de Péage Automatisé • Concession Autoroutière AREZKI BISSAU • Tous droits réservés", en: '© 2026 Automated Toll System • AREZKI BISSAU Highway Concession • All rights reserved' },
+  unauthorizedAccess: { fr: "Accès restreint : ce module n'est pas autorisé pour votre profil.", en: 'Restricted access: this module is not authorized for your profile.' },
+  returnToMainWorkspace: { fr: "Retourner à mon espace de travail", en: 'Return to my workspace' },
 
   // Tabs
   tabCaisse: { fr: 'Poste de Caisse', en: 'Toll Booth' },
